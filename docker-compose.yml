@@ -1,8 +1,6 @@
-version: "3.9"
-
 services:
   minio:
-    image: minio/minio
+    image: minio/minio:latest
     container_name: minio
     command: server /data --console-address ":9001"
     environment:
@@ -12,4 +10,42 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - ./data:/data
+      - ./minio_data:/data
+    networks:
+      - spark-net
+
+  spark-master:
+    image: spark:latest
+    container_name: spark-master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    networks:
+      - spark-net
+
+  spark-worker:
+    image: spark:latest
+    container_name: spark-worker
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    depends_on:
+      - spark-master
+    networks:
+      - spark-net
+
+  notebook:
+    image: jupyter/pyspark-notebook:latest
+    container_name: spark-notebook
+    ports:
+      - "8888:8888"
+    volumes:
+          - .:/home/jovyan/work
+          - ./jars:/usr/local/spark/jars/s3-libs
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+    networks:
+      - spark-net
+
+networks:
+  spark-net:
+    driver: bridge

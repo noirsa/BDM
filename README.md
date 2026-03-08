@@ -12,5 +12,7 @@ Use the following command to deploy MinIO, ..., containers.
 docker compose up -d
 ```
 
+
+Currently we should download `hadoop-aws-3.3.4.jar` and `aws-java-sdk-bundle-1.12.262.jar` to execute Apache Spark with minio
 ---
 
