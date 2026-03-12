@@ -6,46 +6,26 @@ services:
     environment:
       MINIO_ROOT_USER: adminminio
       MINIO_ROOT_PASSWORD: adminminio
+      MINIO_DOMAIN: minio
+
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
       - ./minio_data:/data
-    networks:
-      - spark-net
 
-  spark-master:
-    image: spark:latest
-    container_name: spark-master
-    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
-    ports:
-      - "8080:8080"
-      - "7077:7077"
-    networks:
-      - spark-net
-
-  spark-worker:
-    image: spark:latest
-    container_name: spark-worker
-    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
-    depends_on:
-      - spark-master
-    networks:
-      - spark-net
-
-  notebook:
-    image: jupyter/pyspark-notebook:latest
-    container_name: spark-notebook
+  jupyter:
+    build: ./docker/
     ports:
       - "8888:8888"
-    volumes:
-          - .:/home/jovyan/work
-          - ./jars:/usr/local/spark/jars/s3-libs
     environment:
-      - JUPYTER_ENABLE_LAB=yes
-    networks:
-      - spark-net
+      # Hardcode the $JUPYTER_TOKEN
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN:-deltalake}
+    volumes:
+      - ./minio_data:/data
+      - .:/home/jovyan/work
 
-networks:
-  spark-net:
-    driver: bridge
+volumes:
+  minio_data:
+
+
