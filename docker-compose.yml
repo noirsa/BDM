@@ -22,7 +22,6 @@ services:
       # Hardcode the $JUPYTER_TOKEN
       JUPYTER_TOKEN: ${JUPYTER_TOKEN:-deltalake}
     volumes:
-      - ./minio_data:/data
       - .:/home/jovyan/work
 
 volumes:
