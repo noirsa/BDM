@@ -7,7 +7,6 @@ services:
       MINIO_ROOT_USER: adminminio
       MINIO_ROOT_PASSWORD: adminminio
       MINIO_DOMAIN: minio
-
     ports:
       - "9000:9000"
       - "9001:9001"
