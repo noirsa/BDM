@@ -9,7 +9,7 @@ This repository is part of the first phase of the **BDM 25-26** project, focused
 Use the following command to deploy MinIO, ..., containers.
 
 ```bash
-docker compose up -d
+docker compose up --build -d
 ```
 
 ### Read Weather-Barcelona
