@@ -12,3 +12,14 @@ Use the following command to deploy MinIO, ..., containers.
 docker compose up -d
 ```
 
+### Read Weather-Barcelona
+
+```bash
+docker exec -it bdm-kafka-1 kafka-console-consumer --bootstrap-server kafka:9092 --topic weather-barcelona --from-beginning
+```
+
+### Read Airquality-Barcelona
+
+```bash
+docker exec -it bdm-kafka-1 kafka-console-consumer --bootstrap-server kafka:9092 --topic airquality-barcelona --from-beginning
+```
