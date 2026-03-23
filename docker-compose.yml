@@ -1,12 +1,15 @@
+include:
+  - path: ./airflow.yml
+
 services:
   minio:
     image: minio/minio:latest
     container_name: minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: adminminio
-      MINIO_ROOT_PASSWORD: adminminio
-      MINIO_DOMAIN: minio
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+      MINIO_DOMAIN: ${MINIO_HOST}
     ports:
       - "9000:9000"
       - "9001:9001"

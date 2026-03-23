@@ -1,0 +1,9 @@
+minio:
+  endpoint: ${MINIO_ENDPOINT}
+  access_key: ${MINIO_ACCESS_KEY}
+  secret_key: ${MINIO_SECRET_KEY}
+  buckets:
+    landing: "landing-zone"
+  settings:
+    path_style: true
+    region: "us-east-1"
