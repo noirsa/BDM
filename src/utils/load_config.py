@@ -1,10 +1,15 @@
 import os
+from pathlib import Path
 import yaml
 import re
 from dotenv import load_dotenv
+from functools import lru_cache
 
-load_dotenv()
-def get_minio_config(path="../../configuration/minio.yaml"):
+@lru_cache(maxsize=1)
+def get_minio_config(path=None):
+    if path is None:
+        # This makes it robust regardless of where the script runs
+        path = Path(__file__).resolve().parent.parent.parent / "configuration" / "minio.yaml"
     with open(path, "r") as f:
         # Load the raw text
         raw_yaml = f.read()
@@ -15,7 +20,3 @@ def get_minio_config(path="../../configuration/minio.yaml"):
 
         processed_yaml = re.sub(r"\${(.*?)}", replace_env_var, raw_yaml)
         return yaml.safe_load(processed_yaml)
-
-# Usage in your DAG:
-minio_settings = get_minio_config()["minio"]
-print(f"Connecting to: {minio_settings}")
