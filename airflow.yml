@@ -17,6 +17,8 @@ x-airflow-common:
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/src/airflow/dags
+    PYTHONPATH: /opt:/opt/src/airflow/dags
     # Maybe we need to add something to read from delta
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:- loguru==0.7.3 pytubefix==8.12.2 PyYAML==6.0.2 atproto==0.0.59 minio==7.2.15 vadersentiment==3.3.2 duckdb==1.2.2}
 
@@ -24,21 +26,12 @@ x-airflow-common:
     AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: 1
     AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 1
 
-    # API related environment variables
-    BLUESKY_EMAIL: ${BLUESKY_EMAIL}
-    BLUESKY_PASSWORD: ${BLUESKY_PASSWORD}
-    YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
-    TWITTER_API_KEY: ${TWITTER_API_KEY}
-    MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-    MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
-    MINIO_HOST: ${MINIO_HOST}
-    MINIO_PORT: ${MINIO_PORT}
 
   volumes:
     - airflow-data:/opt/airflow
-    - ./src/airflow/dags:/opt/airflow/dags
-    - ./src:/opt/airflow/dags/src
-    - ./configuration:/opt/airflow/configuration
+    - ./src:/opt/src
+    - ./configuration:/opt/configuration
+    - ./.env:/opt/.env
   user: "${AIRFLOW_UID:-5000}:0"
   depends_on:
     &airflow-common-depends-on
