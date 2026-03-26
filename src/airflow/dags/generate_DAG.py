@@ -18,13 +18,10 @@ def check_infrastructure_integrity(**context):
     """
 
     # 1. Create client
-    storage = MinioClient(config=minio_config)
+    storage = MinioClient()
 
     # 2. Setup initial bucket from config
-    landing_bucket = minio_config.get("buckets", {}).get("landing", "landing-zone")
-
-    log.info(f"Starting infrastructure setup for bucket: {landing_bucket}")
-    storage.ensure_bucket_exists(landing_bucket)
+    storage.ensure_bucket_exists()
 
     return "Infrastructure Ready"
 

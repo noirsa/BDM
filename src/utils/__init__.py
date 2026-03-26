@@ -19,6 +19,6 @@ log = get_logger(__name__)
 
 # 4. Load the configuration and pass the logger for tracking
 # The @lru_cache in get_minio_config ensures this only runs once
-minio_config = get_minio_config()
+minio_config = get_minio_config()['minio']
 
 log.info("Utility package initialized successfully.")
