@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from airflow.sdk import dag, task
-from src.dataloader import MinioClient
+from src import minio_client
 from src.utils import get_logger
 
 # Initialize project-specific logger
@@ -42,11 +42,11 @@ def infrastructure_maintenance():
             logger.info("Initializing MinIO client for integrity check.")
 
             # 1. Initialize the storage client
-            storage = MinioClient()
+
 
             # 2. Ensure bucket hierarchy exists as per minio.yaml
             logger.info("Verifying bucket existence and permissions...")
-            storage.ensure_bucket_exists()
+            minio_client.ensure_bucket_exists()
 
             logger.info("Infrastructure check completed successfully.")
             return "Infrastructure Ready"

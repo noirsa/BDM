@@ -61,11 +61,11 @@ class KaggleLoader(BaseDataLoader):
             }
 
             self.logger.info(f"Successfully loaded {file_name} into DataFrame.")
-
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             self.logger.info(f"Uploading {file_name} to MinIO...")
             self.upload_csv(
                 df=df,
-                object_name = f"{handle.replace('/', '_')}/{name}.csv",
+                object_name = f"{name}_{timestamp}.csv",
                 metadata=metadata
             )
             return df

@@ -1,12 +1,9 @@
 from airflow.sdk import dag, task
 from datetime import datetime, timedelta
 # Standard providers are still imported this way
-from airflow.providers.standard.sensors.external_task import ExternalTaskSensor
 from src.dataloader.kaggle_loader import KaggleLoader
 from src.utils import kaggle_config, get_logger
-from airflow.models import DagRun
-from airflow.utils.db import provide_session
-
+from src import minio_client
 logger = get_logger(__name__)
 
 
@@ -49,7 +46,8 @@ def ingest_kaggle_dag():
     # 2. Define the task using the new SDK @task decorator
     @task(map_index_template="{{ 'ingest_' + source_config['name'].replace('-', '_') }}")
     def run_ingest(source_config: dict):
-        loader = KaggleLoader()
+
+        loader = KaggleLoader(minio_client)
         logger.info(f"Processing dataset: {source_config['name']}")
         if source_config.get('type') == "csv":
             loader.fetch_and_upload_csv(

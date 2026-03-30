@@ -11,16 +11,9 @@ from src.utils import (
 log = get_logger(__name__)
 
 class BaseDataLoader(object):
-    def __init__(self):
+    def __init__(self, minio_client):
         self.logger = log
-        self.minio_config = minio_config
-        # Extract values from the centralized config
-        self.client = (  boto3.client(
-                "s3",
-                endpoint_url=self.minio_config["endpoint"],  # MinIO API endpoint
-                aws_access_key_id=self.minio_config["access_key"], # User name
-                aws_secret_access_key=self.minio_config["secret_key"],  # Password
-            ))
+        self.minio_client = minio_client
         self.logger.info(f"{self.__class__.__name__} service initialized.")
 
 
@@ -49,20 +42,6 @@ class BaseDataLoader(object):
         if metadata is None:
             metadata = {}
 
-        try:
-            # 4. Upload to MinIO
-            # We use .getvalue() to get the byte content of the buffer
-            self.client.put_object(
-                Bucket=bucket_name,
-                Key=full_object_path,
-                Body=csv_buffer.getvalue(),
-                Metadata=metadata,
-                ContentType='text/csv'  # Good practice to set the content type
-            )
-            self.logger.info(f"Successfully uploaded CSV to {bucket_name}/{full_object_path}")
+        self.minio_client.upload_file(bucket_name, full_object_path, csv_buffer.getvalue(),content_type='text/csv', metadata=metadata)
 
-        except ClientError as e:
-            self.logger.error(f"Failed to upload CSV '{object_name}' to bucket '{bucket_name}': {e}")
-            # Re-raise the exception so the Airflow task knows it failed
-            raise
 

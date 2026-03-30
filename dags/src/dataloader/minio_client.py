@@ -109,3 +109,24 @@ class MinioClient:
             self.logger.warning(
                 f"Unexpected error for {object_key}: {e}"
             )
+
+    def upload_file(self, bucket_name, object_key, body, content_type='application/octet-stream', metadata=None):
+        """
+        Uploads data to MinIO bucket.
+        """
+        try:
+            # 4. Upload to MinIO
+            # We use .getvalue() to get the byte content of the buffer
+            self.client.put_object(
+                Bucket=bucket_name,
+                Key=object_key,
+                Body=body,
+                Metadata=metadata,
+                ContentType=content_type
+            )
+            self.logger.info(f"Successfully uploaded CSV to {bucket_name}/{object_key}")
+
+        except ClientError as e:
+            self.logger.error(f"Failed to upload CSV '{object_key}' to bucket '{bucket_name}': {e}")
+            # Re-raise the exception so the Airflow task knows it failed
+            raise

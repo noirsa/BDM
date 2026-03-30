@@ -48,7 +48,7 @@ def get_minio_config():
         processed_yaml = _substitute_env_vars(f.read())
         config = yaml.safe_load(processed_yaml)
 
-    buckets = list(config.get("buckets", {}).keys())
+    buckets = list(config['minio'].get("buckets", {}).keys())
     logger.info(f"MinIO configuration ready. Buckets: {buckets}")
     return config
 
