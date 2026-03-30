@@ -1,0 +1,5 @@
+huggingface_dataset:
+  - name: "natural_disaster_tweets"
+    path: "nlp-pw/Natural_disaster_tweets"
+    split: "train"
+    type: "csv"

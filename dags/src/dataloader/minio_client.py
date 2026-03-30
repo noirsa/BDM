@@ -124,9 +124,9 @@ class MinioClient:
                 Metadata=metadata,
                 ContentType=content_type
             )
-            self.logger.info(f"Successfully uploaded CSV to {bucket_name}/{object_key}")
+            self.logger.info(f"Successfully uploaded {content_type} file to {bucket_name}/{object_key}")
 
         except ClientError as e:
-            self.logger.error(f"Failed to upload CSV '{object_key}' to bucket '{bucket_name}': {e}")
+            self.logger.error(f"Failed to upload  {content_type} file to '{object_key}' to bucket '{bucket_name}': {e}")
             # Re-raise the exception so the Airflow task knows it failed
             raise

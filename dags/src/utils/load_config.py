@@ -54,7 +54,7 @@ def get_minio_config():
 
 
 @lru_cache(maxsize=1)
-def get_kaggle_config():
+def get_dataset_config(path,key):
     """
     Retrieves Kaggle dataset configurations from a YAML file.
 
@@ -67,18 +67,18 @@ def get_kaggle_config():
     """
 
     root = Path(__file__).resolve().parents[3]
-    path = root / "config" / "kaggle_dataset.yaml"
+    path = root / "config" / path
 
     if not path.exists():
-        raise FileNotFoundError(f"Kaggle configuration not found at: {path}")
+        raise FileNotFoundError(f"dataset configuration not found at: {path}")
 
-    logger.info(f"Loading Kaggle dataset configuration from: {path}")
+    logger.info(f"Loading dataset configuration from: {path}")
 
     with open(path, "r") as f:
         # Reusing the substitution logic in case your Kaggle YAML uses env vars too!
         processed_yaml = _substitute_env_vars(f.read())
         config = yaml.safe_load(processed_yaml)
 
-    datasets = config.get("kaggle_dataset", [])
-    logger.info(f"Successfully loaded {len(datasets)} Kaggle datasets.")
+    datasets = config.get(key, [])
+    logger.info(f"Successfully loaded {len(datasets)} datasets configurations from {path}.")
     return config

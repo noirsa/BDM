@@ -17,7 +17,7 @@ class BaseDataLoader(object):
         self.logger.info(f"{self.__class__.__name__} service initialized.")
 
 
-    def upload_csv(self, df, object_name, bucket_name="landing-zone", path="temporal-landing/", metadata=None):
+    def upload_csv(self, df, object_name, bucket_name="landing-zone", path="temporal-landing/", metadata=None,content_type="text/csv"):
         """
         Converts a Pandas DataFrame to CSV and uploads it to MinIO.
         Ensures the file is written to the specified path prefix.
@@ -42,6 +42,28 @@ class BaseDataLoader(object):
         if metadata is None:
             metadata = {}
 
-        self.minio_client.upload_file(bucket_name, full_object_path, csv_buffer.getvalue(),content_type='text/csv', metadata=metadata)
+        self.minio_client.upload_file(bucket_name, full_object_path, csv_buffer.getvalue(),content_type=content_type, metadata=metadata)
+
+    def upload_file(self, bucket_name, object_key, content, content_type=None, metadata=None):
+        """
+        Uploads raw content (bytes) to a specified MinIO bucket with metadata
+
+        param:
+            bucket_name : str
+                The name of the target bucket (e.g., 'landing-zone').
+            object_key : str
+                The full destination path/name of the object in MinIO.
+            content : bytes
+                The raw binary data to be uploaded.
+            content_type : str, optional
+                The MIME type of the file (e.g., 'text/csv', 'image/jpeg').
+            metadata : dict, optional
+                A dictionary of key-value pairs to be stored as object metadata.
+                Note: MinIO/S3 metadata keys are typically stored in lowercase.
+
+        """
+
+        self.minio_client.upload_file(bucket_name, object_key, content, content_type=content_type, metadata=metadata)
+
 
 

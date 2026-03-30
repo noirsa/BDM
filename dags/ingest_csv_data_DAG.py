@@ -1,8 +1,10 @@
 from airflow.sdk import dag, task
 from datetime import datetime, timedelta
+
+from src.dataloader.huggingface_loader import HuggingfaceDataLoader
 # Standard providers are still imported this way
 from src.dataloader.kaggle_loader import KaggleLoader
-from src.utils import kaggle_config, get_logger
+from src.utils import kaggle_config, get_logger,huggingface_config
 from src import minio_client
 logger = get_logger(__name__)
 
@@ -45,7 +47,7 @@ def ingest_kaggle_dag():
     wait_for_infra = wait_for_infra_ready_task()
     # 2. Define the task using the new SDK @task decorator
     @task(map_index_template="{{ 'ingest_' + source_config['name'].replace('-', '_') }}")
-    def run_ingest(source_config: dict):
+    def run_kaggle_ingest(source_config: dict):
 
         loader = KaggleLoader(minio_client)
         logger.info(f"Processing dataset: {source_config['name']}")
@@ -56,6 +58,11 @@ def ingest_kaggle_dag():
                 name=source_config['name'],
                 **source_config.get('params', {})
             )
+        elif source_config.get('type') == "image":
+            loader.fetch_and_upload_image(
+                handle=source_config['handle'],
+                name=source_config['name'],
+            )
         else:
             logger.info(f"currently not supported: {source_config['name']}")
 
@@ -63,13 +70,37 @@ def ingest_kaggle_dag():
     # Ensure this block only runs if kaggle_config is valid
     if kaggle_config:
         # Using .override() is the SDK way to set dynamic task IDs
-        ingest_instance = run_ingest.expand(source_config=kaggle_config)
+        ingest_instance = run_kaggle_ingest.expand(source_config=kaggle_config)
 
         # Set explicit dependency
         wait_for_infra >> ingest_instance
     else:
         logger.warning("No configuration found in kaggle_config list.")
 
+    @task(map_index_template="{{ 'ingest_' + source_config['name'].replace('-', '_') }}")
+    def run_huggingface_ingest(source_config: dict):
+
+        loader = HuggingfaceDataLoader(minio_client)
+        logger.info(f"Processing dataset: {source_config['name']}")
+        if source_config.get('type') == "csv":
+            loader.fetch_and_upload(
+                path=source_config['path'],
+                name=source_config['name'],
+                split= source_config['split'],
+                file_type=source_config['type'],
+            )
+
+        else:
+            logger.info(f"currently not supported: {source_config['name']}")
+
+    if huggingface_config:
+        # Using .override() is the SDK way to set dynamic task IDs
+        ingest_instance = run_huggingface_ingest.expand(source_config=huggingface_config)
+
+        # Set explicit dependency
+        wait_for_infra >> ingest_instance
+    else:
+        logger.warning("No configuration found in kaggle_config list.")
 
 # Instantiate the DAG object
 ingest_kaggle_dag()
