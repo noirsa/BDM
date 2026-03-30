@@ -1,0 +1,21 @@
+minio:
+  endpoint: ${MINIO_ENDPOINT}
+  access_key: ${MINIO_ACCESS_KEY}
+  secret_key: ${MINIO_SECRET_KEY}
+  buckets:
+    landing:
+      name: "landing-zone"
+      sub_buckets:
+        # Persistent Landing: The 'Source of Truth' for raw data
+        persistent_landing:
+          name: "persistent-landing"
+          categories:
+            structured: "structured"         # e.g. Parquet
+            semistructured: "semistructured" # e.g., JSON
+            unstructured_image: "unstructured/image"     # e.g., PDF, Images, Logs
+            unstructured_text: "unstructured/text"     # e.g., PDF, Images, Logs
+            unstructured_video: "unstructured/video"     # e.g., PDF, Images, Logs
+
+        # Temporal Landing: Ephemeral/Buffer area for transient data
+        temporal_landing:
+          name: "temporal-landing"

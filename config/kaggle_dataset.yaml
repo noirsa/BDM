@@ -1,0 +1,21 @@
+kaggle_dataset:
+  - name: "global_warming"
+    type: "csv"
+    handle: "ankushpanday1/global-warming-dataset-195-countries-1900-2023"
+    file: "global_warming_dataset.csv"
+
+  - name: "co2_emission_by_vehicles"
+    type: "csv"
+    handle: "debajyotipodder/co2-emission-by-vehicles"
+    file: "CO2 Emissions_Canada.csv"
+
+  - name: "temperature_change"
+    type: "csv"
+    handle: "sevgisarac/temperature-change"
+    file: "Environment_Temperature_change_E_All_Data_NOFLAG.csv"
+    params:
+      encoding: "latin-1"
+
+  - name: "weather"
+    type: "image"
+    handle: "jehanbhathena/weather-dataset"
