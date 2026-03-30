@@ -10,7 +10,7 @@ from src.utils import (
 
 log = get_logger(__name__)
 
-class CSVDataLoader:
+class BaseDataLoader(object):
     def __init__(self):
         self.logger = log
         self.minio_config = minio_config
@@ -24,13 +24,13 @@ class CSVDataLoader:
         self.logger.info(f"{self.__class__.__name__} service initialized.")
 
 
-    def upload_csv(self, df, bucket_name, object_name, path="temporal-landing/", metadata=None):
+    def upload_csv(self, df, object_name, bucket_name="landing-zone", path="temporal-landing/", metadata=None):
         """
         Converts a Pandas DataFrame to CSV and uploads it to MinIO.
         Ensures the file is written to the specified path prefix.
 
         param:
-        df: Pandas DataFrame
+            df: Pandas DataFrame
             bucket_name: Name of the bucket to upload CSV to
             object_name: Name of the object to upload CSV to
             path: path to upload CSV to
@@ -66,10 +66,3 @@ class CSVDataLoader:
             # Re-raise the exception so the Airflow task knows it failed
             raise
 
-class KaggleLoader(CSVDataLoader):
-    def __init__(self):
-        super().__init__()
-
-
-    def upload_csv(self, df, bucket_name, object_name, path="temporal-landing/", metadata=None):
-        super().upload_csv(df, bucket_name, object_name, path, metadata)

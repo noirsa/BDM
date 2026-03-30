@@ -1,0 +1,74 @@
+from airflow.sdk import dag, task
+from datetime import datetime
+from airflow.sensors.external_task import ExternalTaskSensor
+from src.dataloader.kaggle_loader import KaggleLoader
+from src.utils import kaggle_config,get_logger
+
+logger = get_logger(__name__)
+
+@dag(
+    dag_id='ingest_kaggle_once',
+    start_date=datetime(2026, 3, 30),
+    schedule='@once',
+    catchup=False,
+    tags=['infrastructure', 'kaggle', 'taskflow_api']
+)
+def ingest_kaggle_dag():
+    """
+    Kaggle Dataset Ingestion DAG.
+
+    Orchestrates the extraction of datasets from Kaggle, performs data
+    preprocessing, and uploads the results to the central MinIO landing zone.
+    """
+
+    # Sensor to ensure infrastructure integrity before starting data pipelines.
+    # We use 'reschedule' mode to release worker slots while waiting.
+    wait_for_infra = ExternalTaskSensor(
+        task_id='wait_for_minio_check',
+        external_dag_id='infra_daily_integrity_check',
+        external_task_id='verify_minio_buckets',
+        check_existence=True,
+        timeout=600,
+        allowed_states=['success'],
+        mode='reschedule'
+    )
+
+    @task(task_id="ingest_source")
+    def run_ingest_task(source_config: dict):
+        """
+        Fetches a specific dataset from Kaggle and uploads it to MinIO.
+
+        Args:
+            source_config (dict): Configuration dictionary containing dataset handle,
+                                  file name, and source-specific parameters.
+        """
+        loader = KaggleLoader()
+        data_type = source_config.get('type', 'csv')
+        name = source_config['name']
+
+        if data_type == 'csv':
+            logger.info(f"Initiating CSV upload for dataset: {name}")
+            loader.fetch_and_upload_csv(
+                handle=source_config['handle'],
+                file_name=source_config['file'],
+                name=name,
+                **source_config.get('params', {})
+            )
+        else:
+            logger.warning(f"Unsupported data type '{data_type}' for {name}. Skipping.")
+
+    # Validate configuration before generating dynamic tasks
+    if not kaggle_config:
+        logger.error("Configuration 'kaggle_config' is empty. Please verify YAML source.")
+        return
+
+    # Dynamically generate ingestion tasks for each dataset defined in the config.
+    # Each task depends on the successful completion of the infrastructure check.
+    for config in kaggle_config:
+        task_id = f"ingest_{config['name'].replace('-', '_')}"
+
+        dynamic_task = run_ingest_task.override(task_id=task_id)(
+            source_config=config
+        )
+
+        wait_for_infra >> dynamic_task

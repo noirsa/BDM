@@ -1,31 +1,26 @@
-
 x-airflow-common:
   &airflow-common
-  # image: custom-airflow:2.10.5  <-- Comment this out
-  image: apache/airflow:2.10.5     # <-- Use the official one
-  # build:                         <-- Comment these out
-  #   context: .
-  #   dockerfile: Dockerfile.airflow
+  build: ./docker/airflow
+  env_file:
+    - ${ENV_FILE_PATH:-.env}
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
-    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@airflow-postgres/airflow
-    AIRFLOW__CELERY__BROKER_URL: redis://:@airflow-redis:6379/0
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
     AIRFLOW__CORE__FERNET_KEY: ''
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    # but feel free to experiment with the "built-in" examples by setting this to 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
-    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-    AIRFLOW__CORE__DAGS_FOLDER: /opt/src/airflow/dags
-    PYTHONPATH: /opt:/opt/src/airflow/dags
-    # Maybe we need to add something to read from delta
-    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:- loguru==0.7.3 pytubefix==8.12.2 PyYAML==6.0.2 atproto==0.0.59 minio==7.2.15 vadersentiment==3.3.2 duckdb==1.2.2}
-
-    # These parameters are here only because we are using a small docker deployment, instead of a real cluster
-    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: 1
-    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 1
-
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-airflow_jwt_secret}
+    AIRFLOW__API_AUTH__JWT_ISSUER: ${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow}
+    # MinIO / Delta Lake
+    MINIO_ENDPOINT: 'http://minio:9000'
+    MINIO_ACCESS_KEY: 'minioadmin'
+    MINIO_SECRET_KEY: 'minioadmin'
 
   volumes:
     - airflow-data:/opt/airflow
