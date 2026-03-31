@@ -11,13 +11,13 @@ logger = get_logger(__name__)
 
 
 @dag(
-    dag_id='ingest_kaggle_once',
+    dag_id='ingest_dataset',
     start_date=datetime(2026, 3, 30),
     schedule='@once',
     catchup=False,
-    tags=['infrastructure', 'kaggle']
+    tags=['infrastructure', 'dataset']
 )
-def ingest_kaggle_dag():
+def ingest_dataset_dag():
     """
     Ingestion Pipeline following Airflow 3.0 Task SDK standards.
     """
@@ -103,4 +103,4 @@ def ingest_kaggle_dag():
         logger.warning("No configuration found in kaggle_config list.")
 
 # Instantiate the DAG object
-ingest_kaggle_dag()
+ingest_dataset_dag()

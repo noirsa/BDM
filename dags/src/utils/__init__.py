@@ -24,3 +24,13 @@ kaggle_config = get_dataset_config("kaggle_dataset.yaml","kaggle_dataset")['kagg
 huggingface_config = get_dataset_config("huggingface_dataset.yaml","huggingface_dataset")['huggingface_dataset']
 
 log.info("Utility package initialized successfully.")
+
+storage_options = {
+    "AWS_ACCESS_KEY_ID": minio_config["access_key"],
+    "AWS_SECRET_ACCESS_KEY": minio_config["secret_key"],
+    "AWS_ENDPOINT_URL": minio_config["endpoint"],
+    "AWS_S3_ALLOW_UNSAFE_RENAME": "true",
+    "AWS_S3_ADDRESSING_STYLE": "path",
+    "AWS_ALLOW_HTTP": "true",
+    "region": "us-east-1"
+}

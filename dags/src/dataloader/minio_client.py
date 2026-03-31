@@ -1,5 +1,9 @@
+import time
+
 import boto3
 from botocore.exceptions import ClientError
+import os
+
 from src.utils import (
     get_logger,
     minio_config
@@ -130,3 +134,106 @@ class MinioClient:
             self.logger.error(f"Failed to upload  {content_type} file to '{object_key}' to bucket '{bucket_name}': {e}")
             # Re-raise the exception so the Airflow task knows it failed
             raise
+
+    def _move_file(self, source_bucket, source_key, destination_bucket, destination_key):
+        """
+        Moves an object from one location to another by copying then deleting.
+
+        param:
+        source_bucket : str
+            The bucket name where the file currently resides.
+        source_key : str
+            The path of the source file.
+        destination_bucket : str
+            The bucket name to move the file to.
+        destination_key : str
+            The destination path for the file.
+
+
+        """
+        try:
+
+            copy_source = {'Bucket': source_bucket, 'Key': source_key}
+            self.client.copy_object(
+                CopySource=copy_source,
+                Bucket=destination_bucket,
+                Key=destination_key
+            )
+            self.logger.debug(f"Successfully copied {source_key} to {destination_key}")
+
+            self.client.delete_object(Bucket=source_bucket, Key=source_key)
+            self.logger.debug(f"Successfully deleted original file {source_key}")
+
+
+        except ClientError as e:
+            self.logger.error(f"Failed to move file from {source_key} to {destination_key}: {e}")
+            raise
+
+    def _classify_object_by_head(self, bucket, key):
+        """ This function classify object by head."""
+
+        head = self.client.head_object(Bucket=bucket, Key=key)
+        ct = head.get("ContentType", "")
+        if ct.startswith("image/"):
+            return "image"
+        else:
+            return "structured"
+
+    def move_bucket(self, source_bucket,source_prefix, destination_bucket,destination_prefix=None):
+        """
+            Iterates through a source prefix, classifies each object, and moves it to a structured
+            or unstructured landing zone in the destination bucket.
+
+            The method performs automated routing based on file content, renames files with
+            milliseconds timestamps to avoid collisions, and organizes them into a
+            Medallion-style directory structure.
+
+            Args:
+                source_bucket (str): The bucket containing the incoming raw files.
+                source_prefix (str): The directory prefix to scan (e.g., 'temporal-landing/').
+                destination_bucket (str): The bucket where files will be archived.
+                destination_prefix (str, optional): The base path for the persistent zone
+                                                    (e.g., 'persistent-landing/'). Defaults to "".
+
+            Raises:
+                ClientError: If S3 operations (listing, head, copy, or delete) fail.
+                Exception: For any unexpected processing errors.
+            """
+        paginator = self.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=source_bucket, Prefix=source_prefix):
+            count = 1
+            for obj in page.get("Contents", []):
+                try:
+                    src_key = obj["Key"]
+
+                    # skip folder
+                    if obj['Size'] == 0 and src_key.endswith("/"):
+                        continue
+
+                    # classify
+                    category = self._classify_object_by_head(source_bucket, src_key)
+                    # get file extension
+                    ext = src_key.split('.')[-1].split('?')[0]
+                    # new filename = timestamp + original extension
+                    ts = int(time.time() * 1000)  # milliseconds
+                    if category == "structured":
+                        filename = os.path.splitext(os.path.basename(src_key))[0].split("_")
+                        filename[-1] = str(ts)
+                        filename = "_".join(filename)
+                        new_filename = f"{filename}.{ext}"
+
+                    else:
+                        new_filename = f"{category}_{ts}.{ext}"
+
+                    if category == "image":
+                        category = "unstructured/" + category
+                    elif category == "structured":
+                        category = "structured/raw"
+                    dest_key = f"{destination_prefix}{category}/{new_filename}"
+                    self.logger.debug(f"Moved: {src_key} -> {dest_key}")
+                    self._move_file(source_bucket, src_key,destination_bucket, dest_key)
+                except ClientError as e:
+                    self.logger.exception(f"S3 Error during bucket move for {src_key}: {e}")
+                    raise
+            self.logger.info(f"Successfully routed page {count} of {source_bucket}/{source_prefix} to {destination_bucket}/{destination_prefix}")
+            count += 1

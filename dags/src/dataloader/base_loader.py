@@ -5,7 +5,6 @@ from botocore.exceptions import ClientError
 
 from src.utils import (
     get_logger,
-    minio_config
 )
 
 log = get_logger(__name__)

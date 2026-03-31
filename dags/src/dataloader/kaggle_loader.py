@@ -124,6 +124,6 @@ class KaggleLoader(BaseDataLoader):
                                         "label": category
                                     })
 
-            self.logger.info(f"Successfully ingested {category} of {name} into MinIO.")
+            self.logger.debug(f"Successfully ingested {category} of {name} into MinIO.")
 
         self.logger.info(f"Successfully uploaded {handle} to MinIO.")
