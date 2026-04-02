@@ -11,6 +11,7 @@ minio:
           name: "persistent-landing"
           categories:
             structured: "structured"         # e.g. Parquet
+            structured_raw: "structured/raw" # e.g. original structured file before write in deltalake
             semistructured: "semistructured" # e.g., JSON
             unstructured_image: "unstructured/image"     # e.g., PDF, Images, Logs
             unstructured_text: "unstructured/text"     # e.g., PDF, Images, Logs
