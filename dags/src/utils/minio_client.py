@@ -34,6 +34,10 @@ class MinioClient:
             ))
         self.logger.info("MinioClient service initialized within dataloader.")
 
+    def delete_object(self, bucket_name, object_key):
+        self.client.delete_object(Bucket=bucket_name, Key=object_key)
+        self.logger.debug(f"Deleted object '{object_key}'.")
+
     def verify_empty_bucket(self,bucket_name, prefix=None):
         # Use your existing logic here
         paginator = self.client.get_paginator("list_objects_v2")
@@ -217,8 +221,8 @@ class MinioClient:
                 Exception: For any unexpected processing errors.
             """
         paginator = self.client.get_paginator("list_objects_v2")
+        count = 1
         for page in paginator.paginate(Bucket=source_bucket, Prefix=source_prefix):
-            count = 1
             for obj in page.get("Contents", []):
                 try:
                     src_key = obj["Key"]
@@ -254,3 +258,82 @@ class MinioClient:
                     raise
             self.logger.info(f"Successfully routed page {count} of {source_bucket}/{source_prefix} to {destination_bucket}/{destination_prefix}")
             count += 1
+
+    def get_pending_keys(self, bucket, prefix):
+        """
+        Identifies files within a specific S3 prefix that require processing.
+
+
+        Param:
+            bucket (str): The name of the S3/MinIO bucket to scan.
+            prefix (str): The directory path to filter objects (e.g., 'raw/users/').
+
+        Return:
+            list: A list of object keys (strings) that have a 'pending' status or
+                  no status metadata defined.
+        """
+
+        paginator = self.client.get_paginator("list_objects_v2")
+        keys = []
+        search_prefix = prefix if prefix.endswith('/') else f"{prefix}/"
+        for page in paginator.paginate(Bucket=bucket, Prefix=search_prefix):
+            for obj in page.get("Contents", []):
+
+                if obj['Key'].endswith("/") or obj['Size'] == 0:
+                    continue
+                key = obj["Key"]
+
+                try:
+                    head = self.client.head_object(Bucket=bucket, Key=key)
+
+                    metadata = head.get('Metadata', {})
+                    status = metadata.get("status", metadata.get("Status", "pending"))
+                    self.logger.info(f"Found file: {key} (metadata: {metadata})")
+                    if status == "pending":
+                        self.logger.info(f"Adding to queue: {key}")
+                        keys.append(key)
+                    else:
+                        self.logger.info(f"Skipping processed file: {key} (status: {status})")
+
+                except Exception as e:
+                    self.logger.warning(f"Could not head object {key}: {e}")
+                    continue
+
+        self.logger.info(f"Scan complete. Found {len(keys)} pending files in s3://{bucket}/{prefix}")
+        return keys
+
+    def mark_as_processed(self, bucket, key):
+        """
+        Updates object metadata in-place to mark a file as processed.
+
+
+        Param:
+            bucket (str): The name of the bucket where the file resides.
+            key (str): The specific object key to update.
+
+        """
+        try:
+            # Define the source for the copy operation (same as target)
+            copy_source = {
+                'Bucket': bucket,
+                'Key': key
+            }
+
+            # Perform the in-place copy to update metadata
+            response = self.client.copy_object(
+                Bucket=bucket,
+                Key=key,
+                CopySource=copy_source,
+                # New metadata to be attached to the object
+                Metadata={
+                    'status': 'processed',
+                },
+                # CRITICAL: Must be 'REPLACE' to overwrite existing metadata
+                MetadataDirective='REPLACE'
+            )
+
+            self.logger.debug(f"Successfully marked {key} as processed in MinIO.")
+
+        except ClientError as e:
+            self.logger.error(f"Failed to update metadata for {key}: {e}")
+            raise

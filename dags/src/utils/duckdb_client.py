@@ -18,7 +18,7 @@ class MinioDuckDB:
         # Ensure HTTPFS is available
         try:
             self.con.execute("INSTALL httpfs; LOAD httpfs;")
-
+            self.con.execute("INSTALL delta; LOAD delta;")
             # Configure MinIO connection
             clean_endpoint = self.endpoint.replace("http://", "").replace("https://", "")
             use_ssl = 'true' if 'https' in self.endpoint else 'false'
@@ -44,7 +44,7 @@ class MinioDuckDB:
         # Increase memory limit if your CSVs are very large (e.g., '4GB')
         self.con.execute("SET memory_limit = '2GB';")
 
-    def convert_csv_to_parquet_no_schema(self, src_s3_path: str, dest_s3_path: str):
+    def convert_csv_to_parquet(self,bucket: str, src_s3_path: str, dest_s3_path: str):
         """
         Converts CSV to Parquet without specifying any columns or schema.
         DuckDB will auto-detect everything.
@@ -54,61 +54,79 @@ class MinioDuckDB:
 
         sql = f"""
             COPY (
-                SELECT * FROM read_csv_auto('{src_s3_path}', sample_size=200000)
-            ) TO '{dest_s3_path}' (FORMAT 'PARQUET', COMPRESSION 'SNAPPY');
+                SELECT * FROM read_csv_auto('s3://{bucket}/{src_s3_path}', sample_size=200000)
+            ) TO 's3://{bucket}/{dest_s3_path}' (FORMAT 'PARQUET', COMPRESSION 'SNAPPY');
         """
 
         self.con.execute(sql)
 
-    def final_verification(original_csv, delta_table_path, con):
+    def final_verification(self, original_csv, delta_table_path):
         """
-        Verification without knowing column names.
-        Checks Row Count + Global Data Hash.
+        Ultimate Zero-Schema Data Integrity Verification.
+
+        This method is 'Order-Agnostic' (works regardless of row order) and
+        'Type-Agnostic' (standardizes data to VARCHAR for comparison).
         """
         logger.info("--- Starting Ultimate Verification (Zero-Schema) ---")
 
+        # Ensure the Delta extension is ready for DuckDB
         try:
-            # 1. Row Count & Column Count Check
-            # Ensures the structure hasn't collapsed or split
-            res = con.execute(f"""
+            self.con.execute("INSTALL delta; LOAD delta;")
+        except Exception as e:
+            logger.warning(f"Delta extension might already be loaded: {e}")
+
+        try:
+            # STEP 1: Structural Validation
+            # We use DESCRIBE to count columns to avoid issues with specific data types.
+            # We use delta_scan() to ensure we only count 'active' data in the Lakehouse.
+            structure_sql = f"""
                 SELECT 
-                    (SELECT count(*) FROM read_csv_auto('{original_csv}')) as csv_count,
-                    (SELECT count(*) FROM read_parquet('{delta_table_path}/*.parquet')) as delta_count,
-                    (SELECT len(columns(*)) FROM read_csv_auto('{original_csv}') LIMIT 1) as csv_cols,
-                    (SELECT len(columns(*)) FROM read_parquet('{delta_table_path}/*.parquet') LIMIT 1) as delta_cols
-            """).fetchone()
+                    (SELECT count(*) FROM read_csv_auto('{original_csv}')) as csv_rows,
+                    (SELECT count(*) FROM delta_scan('{delta_table_path}')) as delta_rows,
+                    (SELECT count(*) FROM (DESCRIBE SELECT * FROM read_csv_auto('{original_csv}'))) as csv_cols,
+                    (SELECT count(*) FROM (DESCRIBE SELECT * FROM delta_scan('{delta_table_path}'))) as delta_cols
+            """
+            res = self.con.execute(structure_sql).fetchone()
+            csv_rows, delta_rows, csv_cols, delta_cols = res
 
-            csv_count, delta_count, csv_cols, delta_cols = res
-
-            if csv_count != delta_count or csv_cols != delta_cols:
+            if csv_rows != delta_rows or csv_cols != delta_cols:
                 logger.error(
-                    f"Structural Mismatch! Rows: {csv_count} vs {delta_count}, Cols: {csv_cols} vs {delta_cols}")
+                    f"Structural Mismatch! [Rows] CSV: {csv_rows} vs Delta: {delta_rows} | "
+                    f"[Cols] CSV: {csv_cols} vs Delta: {delta_cols}"
+                )
                 return False
 
-            # 2. Global Checksum (The 'Fingerprint')
-            # We cast every column to VARCHAR and hash the concatenation of the first 10,000 rows.
-            # This catches '1' vs '1.0' because string representations differ.
+            # STEP 2: Deep Content Inspection (Fingerprinting)
+            # Logic:
+            # a) Cast all columns to VARCHAR to standardize (removes storage format differences).
+            # b) Hash each row to create a 'digital signature'.
+            # c) Use BIT_XOR to aggregate all hashes. XOR is commutative (A^B = B^A),
+            #    so the result is identical even if the rows are in a different order.
+            # d) COALESCE handles NULL values so they don't break the string concatenation.
+
             fingerprint_sql = f"""
-                WITH csv_data AS (
-                    SELECT md5(group_concat(columns(*)::VARCHAR)) as hash 
-                    FROM (SELECT * FROM read_csv_auto('{original_csv}') LIMIT 10000)
+                WITH csv_signature AS (
+                    SELECT bit_xor(hash(coalesce(columns(*)::VARCHAR, 'NULL'))) as sign
+                    FROM read_csv_auto('{original_csv}')
                 ),
-                delta_data AS (
-                    SELECT md5(group_concat(columns(*)::VARCHAR)) as hash 
-                    FROM (SELECT * FROM read_parquet('{delta_table_path}/*.parquet') LIMIT 10000)
+                delta_signature AS (
+                    SELECT bit_xor(hash(coalesce(columns(*)::VARCHAR, 'NULL'))) as sign
+                    FROM delta_scan('{delta_table_path}')
                 )
-                SELECT csv_data.hash == delta_data.hash FROM csv_data, delta_data
+                SELECT csv_signature.sign == delta_signature.sign 
+                FROM csv_signature, delta_signature
             """
 
-            is_identical = con.execute(fingerprint_sql).fetchone()[0]
+            is_identical = self.con.execute(fingerprint_sql).fetchone()[0]
 
             if not is_identical:
-                logger.error("Data Integrity Failed! Fingerprints do not match (possible type drift).")
+                logger.error("Data Integrity Failed, Content fingerprints do not match (data corruption or drift).")
+                # Pro tip: If this fails, it's often due to floating point precision (0.666 vs 0.6666667)
                 return False
 
-            logger.info(f" All checks passed! Verified {csv_count} rows across {csv_cols} columns.")
+            logger.info(f"Verification Passed, Confirmed {csv_rows} rows and {csv_cols} columns are identical.")
             return True
 
         except Exception as e:
-            logger.error(f"Verification crashed: {str(e)}")
+            logger.error(f"Verification process crashed: {str(e)}")
             return False

@@ -1,8 +1,11 @@
 from airflow.sdk import dag, task
 from datetime import datetime
 from airflow.sensors.python import PythonSensor
+
+from src.deltalake.csv_deltalake_loader import CSVDeltalakeLoader
 from src.utils import get_logger
-from src import minio_client
+from src import minio_client, duckdb_client
+
 logger = get_logger(__name__)
 
 
@@ -33,7 +36,7 @@ def temporal_to_persistent_dag():
         python_callable=poke_minio_for_real_data,
         mode='reschedule',
         poke_interval=60,
-        timeout=60 * 60 * 12,
+        timeout=60 * 60,
         # No need to pass dag= here when using @dag decorator
     )
 
@@ -55,6 +58,7 @@ def temporal_to_persistent_dag():
         )
 
         return "move complete."
+
 
     wait_for_ingestion >> move_data_task()
 

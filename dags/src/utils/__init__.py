@@ -9,6 +9,7 @@ from .logging_util import configure_logger, get_logger
 from .load_config import get_minio_config, get_dataset_config
 from .minio_client import MinioClient
 from .duckdb_client import MinioDuckDB
+from .parsers import ImageParser
 # 1. Load environment variables first (No logging dependencies here)
 setup_environment()
 
