@@ -1,13 +1,12 @@
 import time
+from sys import prefix
 
 import boto3
 from botocore.exceptions import ClientError
 import os
 
-from src.utils import (
-    get_logger,
-    minio_config
-)
+from . import  get_logger, get_minio_config
+minio_config = get_minio_config()['minio']
 
 log = get_logger(__name__)
 class MinioClient:
@@ -34,6 +33,24 @@ class MinioClient:
                 aws_secret_access_key=self.minio_config["secret_key"],  # Password
             ))
         self.logger.info("MinioClient service initialized within dataloader.")
+
+    def verify_empty_bucket(self,bucket_name, prefix=None):
+        # Use your existing logic here
+        paginator = self.client.get_paginator("list_objects_v2")
+
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                key = obj.get('Key', '')
+                size = obj.get('Size', 0)
+                # Your specific logic:
+                if size == 0 and key.endswith("/"):
+                    continue
+
+                # If we find even one file that is > 0 bytes and not a keeper
+                if size > 0:
+                    self.logger.info(f"Found valid data: {key}")
+                    return True
+        return False
 
     def ensure_bucket_exists(self):
         """

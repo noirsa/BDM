@@ -7,7 +7,8 @@ are set up in the correct sequence before any data processing tasks begin.
 from .env_utils import setup_environment
 from .logging_util import configure_logger, get_logger
 from .load_config import get_minio_config, get_dataset_config
-
+from .minio_client import MinioClient
+from .duckdb_client import MinioDuckDB
 # 1. Load environment variables first (No logging dependencies here)
 setup_environment()
 

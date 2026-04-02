@@ -6,7 +6,8 @@ log = get_logger(__name__)
 
 
 class BaseTransformer:
-    def __init__(self,minio_client):
+    def __init__(self,minio_client,duckdb_client):
         self.logger = log
         self.minio_client = minio_client
         self.logger.info(f"{self.__class__.__name__} service initialized.")
+        self.duckdb_client= duckdb_client

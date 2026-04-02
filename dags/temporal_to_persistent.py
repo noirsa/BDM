@@ -1,11 +1,18 @@
 from airflow.sdk import dag, task
 from datetime import datetime
-from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
+from airflow.sensors.python import PythonSensor
 from src.utils import get_logger
 from src import minio_client
 logger = get_logger(__name__)
 
 
+def poke_minio_for_real_data(**kwargs):
+
+
+    if not minio_client.verify_empty_bucket("landing-zone","temporal-landing/"):
+        logger.info("Empty bucket detected.")
+        return False
+    return True
 
 @dag(
     dag_id='temporal_to_persistent',
@@ -21,14 +28,13 @@ def temporal_to_persistent_dag():
 
     # Monitors the landing zone for ANY file.
     # Using wildcard '*' allows the pipeline to be triggered by any incoming data.
-    wait_for_ingestion = S3KeySensor(
-        task_id='wait_for_ingestion_data',
-        bucket_name='landing-zone',
-        bucket_key='temporal-landing/*',
-        wildcard_match=True,
-        timeout=60 * 60,
+    wait_for_ingestion = PythonSensor(
+        task_id='wait_for_temporal_data',
+        python_callable=poke_minio_for_real_data,
+        mode='reschedule',
         poke_interval=60,
-        mode='reschedule'
+        timeout=60 * 60 * 12,
+        # No need to pass dag= here when using @dag decorator
     )
 
     # This task encapsulates the business logic for sorting files.
