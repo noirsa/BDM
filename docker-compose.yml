@@ -147,6 +147,8 @@ services:
 
   kafka-producer:
     build: ./docker/producer
+    env_file:
+    - .env
     environment:
       KAFKA_BOOTSTRAP_SERVERS: 'kafka:9092'
       KAFKA_TOPIC: 'server-metrics-raw'
@@ -376,15 +378,15 @@ services:
     depends_on:
       <<: *airflow-common-depends-on
 
-  jupyter-playground:
-    build: ./docker/jupyter
+  jupyter:
+    build: ./docker/jupyter/
     ports:
       - "8888:8888"
     environment:
       # Hardcode the $JUPYTER_TOKEN
-      JUPYTER_TOKEN: ${JUPYTER_TOKEN:-playground}
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN:-jupyter}
     volumes:
-      - ./notebooks:/home/jovyan/notebooks
+      - .:/home/jovyan/work
     restart: unless-stopped
 
 volumes:
