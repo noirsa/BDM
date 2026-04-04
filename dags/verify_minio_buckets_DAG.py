@@ -17,6 +17,7 @@ logger = get_logger(__name__)
         'retries': 3,
         'retry_delay': timedelta(minutes=10),
     },
+    is_paused_upon_creation=False,
     tags=['infrastructure', 'maintenance', 'landing_zone']
 )
 def infrastructure_maintenance():

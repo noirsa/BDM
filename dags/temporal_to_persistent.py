@@ -1,27 +1,35 @@
 from airflow.sdk import dag, task
-from datetime import datetime
-from airflow.sensors.python import PythonSensor
-
-from src.deltalake.csv_deltalake_loader import CSVDeltalakeLoader
+from datetime import datetime,timedelta
+from airflow.providers.standard.sensors.python import PythonSensor
+from airflow.models import DagRun
+from airflow.utils.state import State
 from src.utils import get_logger
-from src import minio_client, duckdb_client
-
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
+from src import minio_client
+from airflow.exceptions import AirflowSkipException
+from airflow.sensors.time_delta import TimeDeltaSensor
 logger = get_logger(__name__)
 
 
-def poke_minio_for_real_data(**kwargs):
+def poke_minio_for_real_data(**context):
+    conf = context.get('dag_run').conf or {}
+    source = "Automated" if conf.get('trigger_source') == 'auto_ingest' else "Manual"
 
+    # Logic Correction: If bucket is NOT empty, then we found data.
+    if minio_client.verify_empty_bucket("landing-zone", "temporal-landing/"):
+        logger.info(f"[{source}] Checking temporal-landing... Bucket is still empty. skip...")
+        raise AirflowSkipException("No files found in temporal-landing, skipping downstream tasks.")
 
-    if not minio_client.verify_empty_bucket("landing-zone","temporal-landing/"):
-        logger.info("Empty bucket detected.")
-        return False
+    # Data found!
+    logger.info(f"[{source}] Data detected in temporal-landing! Triggering move task now.")
     return True
 
 @dag(
     dag_id='temporal_to_persistent',
     start_date=datetime(2026, 3, 30),
-    schedule='@once',
+    schedule=None,
     catchup=False,
+    is_paused_upon_creation=False,
     tags=['infrastructure', 'dataset','persistent landing','deltalake']
 )
 def temporal_to_persistent_dag():
@@ -29,6 +37,29 @@ def temporal_to_persistent_dag():
     Main DAG definition for the Temporal to Persistent workflow.
     """
 
+    @task.branch
+    def check_trigger_source(**context):
+        """
+        Check if the DAG was triggered by the Ingestion DAG or manually.
+        If auto-triggered, go to the 10-minute buffer.
+        If manually triggered, skip the buffer.
+        """
+        conf = context.get('dag_run').conf
+
+        # If the 'auto_ingest' flag is found, route to the wait sensor
+        if conf and conf.get('trigger_source') == 'auto_ingest':
+            return 'buffer_wait_10_mins'
+
+        # Otherwise (Manual Trigger), go straight to the move task
+        return 'wait_for_temporal_data'
+
+    # 10-minute "Regret Window" for automated runs
+    # mode='reschedule' ensures we don't waste worker slots while waiting
+    buffer_wait = TimeDeltaSensor(
+        task_id='buffer_wait_10_mins',
+        delta=timedelta(minutes=10),
+        mode='reschedule',
+    )
     # Monitors the landing zone for ANY file.
     # Using wildcard '*' allows the pipeline to be triggered by any incoming data.
     wait_for_ingestion = PythonSensor(
@@ -36,12 +67,12 @@ def temporal_to_persistent_dag():
         python_callable=poke_minio_for_real_data,
         mode='reschedule',
         poke_interval=60,
-        timeout=60 * 60,
-        # No need to pass dag= here when using @dag decorator
+        timeout=60 * 3,
+        trigger_rule='none_failed_min_one_success'
     )
 
     # This task encapsulates the business logic for sorting files.
-    @task
+    @task(trigger_rule='none_failed_min_one_success')
     def move_data_task():
         """
             Executes the move_bucket operation to sort files into
@@ -59,8 +90,12 @@ def temporal_to_persistent_dag():
 
         return "move complete."
 
+    branch_op = check_trigger_source()
+
+    branch_op >> buffer_wait >> wait_for_ingestion
+
+    branch_op >> wait_for_ingestion
 
     wait_for_ingestion >> move_data_task()
-
 # Instantiate the DAG
 temporal_to_persistent_dag()

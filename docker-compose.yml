@@ -5,6 +5,7 @@ x-airflow-common:
     - ${ENV_FILE_PATH:-.env}
   environment:
     &airflow-common-env
+    AIRFLOW__POOLS__INGESTION_LOCK: '{"slots":1,"description":"Mutex for ingestion and move tasks"}'
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW_CONN_AWS_DEFAULT: "aws://${MINIO_ACCESS_KEY}:${MINIO_SECRET_KEY}@/?endpoint_url=http%3A%2F%2Fminio%3A9000&addressing_style=path"
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
@@ -12,6 +13,7 @@ x-airflow-common:
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
     AIRFLOW__CORE__FERNET_KEY: ''
+
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     # but feel free to experiment with the "built-in" examples by setting this to 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'

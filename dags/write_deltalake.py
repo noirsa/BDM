@@ -11,8 +11,9 @@ logger = get_logger(__name__)
 @dag(
     dag_id='write_deltalake',
     start_date=datetime(2026, 3, 30),
-    schedule='@once',
+    schedule=None,
     catchup=False,
+    is_paused_upon_creation=False,
     tags=['infrastructure', 'dataset','persistent landing','deltalake']
 )
 def write_deltalake_dag():

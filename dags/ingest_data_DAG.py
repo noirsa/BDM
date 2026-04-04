@@ -1,10 +1,11 @@
 from airflow.sdk import dag, task
 from datetime import datetime, timedelta
-
+from src.utils import get_logger
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
+from src.utils import kaggle_config,huggingface_config
 from src.dataloader.huggingface_loader import HuggingfaceDataLoader
 # Standard providers are still imported this way
 from src.dataloader.kaggle_loader import KaggleLoader
-from src.utils import kaggle_config, get_logger,huggingface_config
 from src import minio_client
 logger = get_logger(__name__)
 
@@ -15,7 +16,8 @@ logger = get_logger(__name__)
     start_date=datetime(2026, 3, 30),
     schedule='@once',
     catchup=False,
-    tags=['infrastructure', 'dataset']
+    tags=['infrastructure', 'dataset'],
+    is_paused_upon_creation=False
 )
 def ingest_dataset_dag():
     """
@@ -70,10 +72,10 @@ def ingest_dataset_dag():
     # Ensure this block only runs if kaggle_config is valid
     if kaggle_config:
         # Using .override() is the SDK way to set dynamic task IDs
-        ingest_instance = run_kaggle_ingest.expand(source_config=kaggle_config)
+        ingest_instance_kaggle = run_kaggle_ingest.expand(source_config=kaggle_config)
 
         # Set explicit dependency
-        wait_for_infra >> ingest_instance
+        wait_for_infra >> ingest_instance_kaggle
     else:
         logger.warning("No configuration found in kaggle_config list.")
 
@@ -95,12 +97,21 @@ def ingest_dataset_dag():
 
     if huggingface_config:
         # Using .override() is the SDK way to set dynamic task IDs
-        ingest_instance = run_huggingface_ingest.expand(source_config=huggingface_config)
+        ingest_instance_hf = run_huggingface_ingest.expand(source_config=huggingface_config)
 
         # Set explicit dependency
-        wait_for_infra >> ingest_instance
+        wait_for_infra >> ingest_instance_hf
     else:
         logger.warning("No configuration found in kaggle_config list.")
+
+    trigger_move = TriggerDagRunOperator(
+        task_id='trigger_persistent_move',
+        trigger_dag_id='temporal_to_persistent',
+        conf={"trigger_source": "auto_ingest"},  # Signal for automated buffer
+        wait_for_completion=False,
+    )
+
+    [ingest_instance_kaggle, ingest_instance_hf] >> trigger_move
 
 # Instantiate the DAG object
 ingest_dataset_dag()

@@ -53,8 +53,8 @@ class MinioClient:
                 # If we find even one file that is > 0 bytes and not a keeper
                 if size > 0:
                     self.logger.info(f"Found valid data: {key}")
-                    return True
-        return False
+                    return False
+        return True
 
     def ensure_bucket_exists(self):
         """
