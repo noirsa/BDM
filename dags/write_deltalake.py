@@ -1,6 +1,7 @@
 from airflow.sdk import dag, task
-from datetime import datetime
+from datetime import datetime,timedelta
 from airflow.sensors.python import PythonSensor
+from airflow.sensors.time_delta import TimeDeltaSensor
 
 from src.deltalake.catalog_builder import CatalogBuilder
 from src.deltalake.csv_deltalake_loader import CSVDeltalakeLoader
@@ -17,6 +18,28 @@ logger = get_logger(__name__)
     tags=['infrastructure', 'dataset','persistent landing','deltalake']
 )
 def write_deltalake_dag():
+    @task.branch
+    def check_trigger_source(**context):
+        """
+        Check if the DAG was triggered by the Ingestion DAG or manually.
+        If auto-triggered, go to the 10-minute buffer.
+        If manually triggered, skip the buffer.
+        """
+        conf = context.get('dag_run').conf
+
+        # If the 'auto_ingest' flag is found, route to the wait sensor
+        if conf and conf.get('trigger_source') == 'auto_ingest':
+            return 'buffer_wait_10_mins'
+
+        # Otherwise (Manual Trigger), go straight to the deltalake task
+        return ['structured_to_deltalake_task', 'write_image_catalog_task']
+    # 3-minute "Regret Window" for automated runs
+    # mode='reschedule' ensures we don't waste worker slots while waiting
+    buffer_wait = TimeDeltaSensor(
+        task_id='buffer_wait_3_mins',
+        delta=timedelta(minutes=3),
+        mode='reschedule',
+    )
     @task
     def structured_to_deltalake_task():
         logger.info("Starting structured data migration task.")
@@ -47,5 +70,13 @@ def write_deltalake_dag():
         except Exception as e:
             logger.error(f"Catalog Task Failed: {str(e)}", exc_info=True)
             raise  # Ensure Airflow marks the task as failed
-    write_image_catalog_task()
+
+    branch_op = check_trigger_source()
+    t1 = structured_to_deltalake_task()
+    t2 = write_image_catalog_task()
+
+    branch_op >> buffer_wait >> [t1, t2]
+    branch_op >> [t1, t2]
+
+
 write_deltalake_dag()

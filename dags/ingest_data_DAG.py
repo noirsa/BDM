@@ -68,12 +68,13 @@ def ingest_dataset_dag():
         else:
             logger.info(f"currently not supported: {source_config['name']}")
 
+    ingest_tasks = []
     # 3. Dynamic Task Generation
     # Ensure this block only runs if kaggle_config is valid
     if kaggle_config:
         # Using .override() is the SDK way to set dynamic task IDs
         ingest_instance_kaggle = run_kaggle_ingest.expand(source_config=kaggle_config)
-
+        ingest_tasks.append(ingest_instance_kaggle)
         # Set explicit dependency
         wait_for_infra >> ingest_instance_kaggle
     else:
@@ -98,7 +99,7 @@ def ingest_dataset_dag():
     if huggingface_config:
         # Using .override() is the SDK way to set dynamic task IDs
         ingest_instance_hf = run_huggingface_ingest.expand(source_config=huggingface_config)
-
+        ingest_tasks.append(ingest_instance_hf)
         # Set explicit dependency
         wait_for_infra >> ingest_instance_hf
     else:
@@ -111,7 +112,8 @@ def ingest_dataset_dag():
         wait_for_completion=False,
     )
 
-    [ingest_instance_kaggle, ingest_instance_hf] >> trigger_move
+    if ingest_tasks:
+        ingest_tasks >> trigger_move
 
 # Instantiate the DAG object
 ingest_dataset_dag()

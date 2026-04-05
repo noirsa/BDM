@@ -15,12 +15,12 @@ def poke_minio_for_real_data(**context):
     conf = context.get('dag_run').conf or {}
     source = "Automated" if conf.get('trigger_source') == 'auto_ingest' else "Manual"
 
-    # Logic Correction: If bucket is NOT empty, then we found data.
     if minio_client.verify_empty_bucket("landing-zone", "temporal-landing/"):
+        if source == "Automated":
+            raise Exception("Expected data but found none.")
         logger.info(f"[{source}] Checking temporal-landing... Bucket is still empty. skip...")
         raise AirflowSkipException("No files found in temporal-landing, skipping downstream tasks.")
 
-    # Data found!
     logger.info(f"[{source}] Data detected in temporal-landing! Triggering move task now.")
     return True
 
@@ -48,16 +48,16 @@ def temporal_to_persistent_dag():
 
         # If the 'auto_ingest' flag is found, route to the wait sensor
         if conf and conf.get('trigger_source') == 'auto_ingest':
-            return 'buffer_wait_10_mins'
+            return 'buffer_wait_3_mins'
 
         # Otherwise (Manual Trigger), go straight to the move task
         return 'wait_for_temporal_data'
 
-    # 10-minute "Regret Window" for automated runs
+    # 3-minute "Regret Window" for automated runs
     # mode='reschedule' ensures we don't waste worker slots while waiting
     buffer_wait = TimeDeltaSensor(
-        task_id='buffer_wait_10_mins',
-        delta=timedelta(minutes=10),
+        task_id='buffer_wait_3_mins',
+        delta=timedelta(minutes=3),
         mode='reschedule',
     )
     # Monitors the landing zone for ANY file.
@@ -90,12 +90,23 @@ def temporal_to_persistent_dag():
 
         return "move complete."
 
+    trigger_delta_write = TriggerDagRunOperator(
+        task_id='trigger_deltalake_write',
+        trigger_dag_id='write_deltalake',
+        conf={"source": "temporal_to_persistent_flow"},
+        wait_for_completion=False,
+    )
+
     branch_op = check_trigger_source()
 
     branch_op >> buffer_wait >> wait_for_ingestion
 
     branch_op >> wait_for_ingestion
 
-    wait_for_ingestion >> move_data_task()
+    move_task_instance = move_data_task()
+
+    wait_for_ingestion >> move_task_instance >> trigger_delta_write
+
+
 # Instantiate the DAG
 temporal_to_persistent_dag()
