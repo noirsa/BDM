@@ -15,6 +15,8 @@ import os
     schedule="@daily",
     start_date=datetime(2026, 4, 1),
     catchup=False,
+    is_paused_upon_creation=False,
+
     tags=["catalog", "metadata"]
 )
 def daily_catalog_update():
