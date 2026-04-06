@@ -3,12 +3,6 @@ from datetime import datetime,timedelta
 from airflow.sensors.python import PythonSensor
 from airflow.sensors.time_delta import TimeDeltaSensor
 
-from src.deltalake.catalog_builder import CatalogBuilder
-from src.deltalake.csv_deltalake_loader import CSVDeltalakeLoader
-from src.utils import get_logger
-from src import minio_client,duckdb_client
-logger = get_logger(__name__)
-
 @dag(
     dag_id='write_deltalake',
     start_date=datetime(2026, 3, 30),
@@ -22,14 +16,14 @@ def write_deltalake_dag():
     def check_trigger_source(**context):
         """
         Check if the DAG was triggered by the Ingestion DAG or manually.
-        If auto-triggered, go to the 10-minute buffer.
+        If auto-triggered, go to the 3-minute buffer.
         If manually triggered, skip the buffer.
         """
-        conf = context.get('dag_run').conf
+        conf = context.get('dag_run').conf or {}
 
         # If the 'auto_ingest' flag is found, route to the wait sensor
-        if conf and conf.get('trigger_source') == 'auto_ingest':
-            return 'buffer_wait_10_mins'
+        if conf and conf.get('trigger_source') == 'temporal_to_persistent_flow':
+            return 'buffer_wait_3_mins'
 
         # Otherwise (Manual Trigger), go straight to the deltalake task
         return ['structured_to_deltalake_task', 'write_image_catalog_task']
@@ -40,8 +34,14 @@ def write_deltalake_dag():
         delta=timedelta(minutes=3),
         mode='reschedule',
     )
-    @task
+
+    @task(trigger_rule='none_failed_min_one_success')
     def structured_to_deltalake_task():
+        from src.deltalake.csv_deltalake_loader import CSVDeltalakeLoader
+        from src.utils import get_logger
+        from src import minio_client, duckdb_client
+        logger = get_logger(__name__)
+
         logger.info("Starting structured data migration task.")
         logger.info("Source: landing-zone | Destination Prefix: persistent-landing/structured/raw/")
 
@@ -49,10 +49,13 @@ def write_deltalake_dag():
 
         loader.load_and_transform("landing-zone", "persistent-landing/structured/raw/")
         logger.info("Structured data migration completed successfully.")
-    structured_to_deltalake_task()
 
-    @task
+    @task(trigger_rule='none_failed_min_one_success')
     def write_image_catalog_task(**kwargs):
+        from src.deltalake.catalog_builder import CatalogBuilder
+        from src.utils import get_logger
+        from src import minio_client, duckdb_client
+        logger = get_logger(__name__)
         logger.info("Initializing CatalogBuilder for Image Sync.")
 
         try:

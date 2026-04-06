@@ -3,17 +3,18 @@ from datetime import datetime,timedelta
 from airflow.providers.standard.sensors.python import PythonSensor
 from airflow.models import DagRun
 from airflow.utils.state import State
-from src.utils import get_logger
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
-from src import minio_client
 from airflow.exceptions import AirflowSkipException
 from airflow.sensors.time_delta import TimeDeltaSensor
-logger = get_logger(__name__)
 
 
 def poke_minio_for_real_data(**context):
+    from src.utils import get_logger
+    from src import minio_client
+
     conf = context.get('dag_run').conf or {}
     source = "Automated" if conf.get('trigger_source') == 'auto_ingest' else "Manual"
+    logger = get_logger(context.get('task_id'))
 
     if minio_client.verify_empty_bucket("landing-zone", "temporal-landing/"):
         if source == "Automated":
@@ -41,7 +42,7 @@ def temporal_to_persistent_dag():
     def check_trigger_source(**context):
         """
         Check if the DAG was triggered by the Ingestion DAG or manually.
-        If auto-triggered, go to the 10-minute buffer.
+        If auto-triggered, go to the 3-minute buffer.
         If manually triggered, skip the buffer.
         """
         conf = context.get('dag_run').conf
@@ -78,6 +79,10 @@ def temporal_to_persistent_dag():
             Executes the move_bucket operation to sort files into
             structured/raw or unstructured/image directories.
         """
+        from src.utils import get_logger
+        from src import minio_client
+
+        logger = get_logger("move_data_task")
 
         logger.info("Executing bucket migration and classification logic.")
 
@@ -93,7 +98,7 @@ def temporal_to_persistent_dag():
     trigger_delta_write = TriggerDagRunOperator(
         task_id='trigger_deltalake_write',
         trigger_dag_id='write_deltalake',
-        conf={"source": "temporal_to_persistent_flow"},
+        conf={"trigger_source": "temporal_to_persistent_flow"},
         wait_for_completion=False,
     )
 

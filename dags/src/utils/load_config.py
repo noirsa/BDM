@@ -82,3 +82,33 @@ def get_dataset_config(path,key):
     datasets = config.get(key, [])
     logger.info(f"Successfully loaded {len(datasets)} datasets configurations from {path}.")
     return config
+
+@lru_cache(maxsize=1)
+def get_kafka_config(path,key):
+    """
+    Retrieves Kaggle dataset configurations from a YAML file.
+
+    Returns:
+        dict: The processed configuration dictionary containing dataset details.
+
+    Raises:
+        FileNotFoundError: If the kaggle_dataset.yaml file is not found at the expected project path.
+        yaml.YAMLError: If the configuration file contains invalid YAML syntax.
+    """
+
+    root = Path(__file__).resolve().parents[3]
+    path = root / "config" / path
+
+    if not path.exists():
+        raise FileNotFoundError(f"kafka configuration not found at: {path}")
+
+    logger.info(f"Loading dataset configuration from: {path}")
+
+    with open(path, "r") as f:
+        # Reusing the substitution logic in case your Kaggle YAML uses env vars too!
+        processed_yaml = _substitute_env_vars(f.read())
+        config = yaml.safe_load(processed_yaml)
+
+    datasets = config.get(key, [])
+    logger.info(f"Successfully loaded {len(datasets)} configurations of kafka consumer from {path}.")
+    return config

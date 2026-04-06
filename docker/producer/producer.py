@@ -17,6 +17,7 @@ latitude = 41.385
 longitude = 2.173
 
 OPENAQ_API_KEY = os.environ.get("OPENAQ_API_KEY")
+print(OPENAQ_API_KEY)
 spain_country_id = 67
 search_city = "Barcelona"
 

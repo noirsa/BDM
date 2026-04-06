@@ -1,0 +1,5 @@
+kafka_consumer:
+  - name: "weather-barcelona"
+    group_id: "weather-group"
+  - name: "airquality-barcelona"
+    group_id: "airquality-group"

@@ -6,10 +6,11 @@ are set up in the correct sequence before any data processing tasks begin.
 
 from .env_utils import setup_environment
 from .logging_util import configure_logger, get_logger
-from .load_config import get_minio_config, get_dataset_config
+from .load_config import get_minio_config, get_dataset_config, get_kafka_config
 from .minio_client import MinioClient
 from .duckdb_client import MinioDuckDB
 from .parsers import ImageParser
+from .helper import get_deep_keys
 # 1. Load environment variables first (No logging dependencies here)
 setup_environment()
 
@@ -24,7 +25,7 @@ log = get_logger(__name__)
 minio_config = get_minio_config()['minio']
 kaggle_config = get_dataset_config("kaggle_dataset.yaml","kaggle_dataset")['kaggle_dataset']
 huggingface_config = get_dataset_config("huggingface_dataset.yaml","huggingface_dataset")['huggingface_dataset']
-
+kafka_config = get_kafka_config("kafka.yaml","kafka_consumer")['kafka_consumer']
 log.info("Utility package initialized successfully.")
 
 storage_options = {

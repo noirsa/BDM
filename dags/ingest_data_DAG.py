@@ -1,13 +1,9 @@
 from airflow.sdk import dag, task
 from datetime import datetime, timedelta
-from src.utils import get_logger
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from src.utils import kaggle_config,huggingface_config
-from src.dataloader.huggingface_loader import HuggingfaceDataLoader
 # Standard providers are still imported this way
-from src.dataloader.kaggle_loader import KaggleLoader
-from src import minio_client
-logger = get_logger(__name__)
+
 
 
 
@@ -50,9 +46,13 @@ def ingest_dataset_dag():
     # 2. Define the task using the new SDK @task decorator
     @task(map_index_template="{{ 'ingest_' + source_config['name'].replace('-', '_') }}")
     def run_kaggle_ingest(source_config: dict):
-
+        from src.utils import get_logger
+        from src.dataloader.kaggle_loader import KaggleLoader
+        from src import minio_client
         loader = KaggleLoader(minio_client)
+        logger = get_logger(__name__)
         logger.info(f"Processing dataset: {source_config['name']}")
+
         if source_config.get('type') == "csv":
             loader.fetch_and_upload_csv(
                 handle=source_config['handle'],
@@ -77,14 +77,17 @@ def ingest_dataset_dag():
         ingest_tasks.append(ingest_instance_kaggle)
         # Set explicit dependency
         wait_for_infra >> ingest_instance_kaggle
-    else:
-        logger.warning("No configuration found in kaggle_config list.")
+
 
     @task(map_index_template="{{ 'ingest_' + source_config['name'].replace('-', '_') }}")
     def run_huggingface_ingest(source_config: dict):
-
+        from src.utils import get_logger
+        from src.dataloader.huggingface_loader import HuggingfaceDataLoader
+        from src import minio_client
         loader = HuggingfaceDataLoader(minio_client)
+        logger = get_logger(__name__)
         logger.info(f"Processing dataset: {source_config['name']}")
+
         if source_config.get('type') == "csv":
             loader.fetch_and_upload(
                 path=source_config['path'],
@@ -102,8 +105,6 @@ def ingest_dataset_dag():
         ingest_tasks.append(ingest_instance_hf)
         # Set explicit dependency
         wait_for_infra >> ingest_instance_hf
-    else:
-        logger.warning("No configuration found in kaggle_config list.")
 
     trigger_move = TriggerDagRunOperator(
         task_id='trigger_persistent_move',

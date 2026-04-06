@@ -102,5 +102,5 @@ class CatalogBuilder(BaseDeltalakeLoader):
 
         except Exception as e:
             self.logger.exception(f"Catalog ingestion failed: {str(e)}")
-        raise
+            raise
 
