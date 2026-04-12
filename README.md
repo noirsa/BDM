@@ -37,3 +37,15 @@ docker exec -it bdm-kafka-1 kafka-console-consumer --bootstrap-server kafka:9092
 * **Airflow Tasks**:
     * Both `daily_kafka_data_catalog_update` and `ingest_kafka_dataset` are scheduled to run when the Airflow service is active.
     * **Frequency**: The catalog update runs **once daily**, while the dataset ingestion runs **every 5 minutes** by default.
+
+---
+
+## Execution Order
+
+### Landing Zone
+- `landing_zone.ipynb`
+- `temporal_landing.ipynb`  
+- `persistent_landing.ipynb`  
+- `persistent_landing_delta_lake.ipynb`
+- `data_ingestion_streaming.ipynb`
+- `persistent_landing_delta_lake_nonstructured.ipynb`
