@@ -41,7 +41,7 @@ docker exec -it bdm-kafka-1 kafka-console-consumer --bootstrap-server kafka:9092
 ---
 
 ## Execution Order
-
+- **Jupyter token**: `jupyter`
 ### Landing Zone
 - `landing_zone.ipynb`
 - `temporal_landing.ipynb`  
