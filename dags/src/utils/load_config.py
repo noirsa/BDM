@@ -53,62 +53,40 @@ def get_minio_config():
     return config
 
 
-@lru_cache(maxsize=1)
-def get_dataset_config(path,key):
+@lru_cache(maxsize=10)
+def get_config(file_name, key):
     """
-    Retrieves Kaggle dataset configurations from a YAML file.
+    Generic configuration loader that reads YAML files from the project's config directory.
+    It supports environment variable substitution and caches results for performance.
+
+    Param:
+        file_name (str): The name of the YAML file (e.g., 'kafka_consumer.yaml').
+        key (str): The top-level key in the YAML to extract data from.
 
     Returns:
-        dict: The processed configuration dictionary containing dataset details.
+        list|dict: The data associated with the specified key, or an empty list if not found.
 
     Raises:
-        FileNotFoundError: If the kaggle_dataset.yaml file is not found at the expected project path.
-        yaml.YAMLError: If the configuration file contains invalid YAML syntax.
+        FileNotFoundError: If the configuration file does not exist at the expected path.
     """
-
+    # Navigate up 3 levels from this file to locate the project root, then enter the 'config' folder
     root = Path(__file__).resolve().parents[3]
-    path = root / "config" / path
+    path = root / "config" / file_name
 
     if not path.exists():
-        raise FileNotFoundError(f"dataset configuration not found at: {path}")
+        logger.error(f"Configuration file missing at: {path}")
+        raise FileNotFoundError(f"Configuration not found at: {path}")
 
-    logger.info(f"Loading dataset configuration from: {path}")
-
-    with open(path, "r") as f:
-        # Reusing the substitution logic in case your Kaggle YAML uses env vars too!
-        processed_yaml = _substitute_env_vars(f.read())
-        config = yaml.safe_load(processed_yaml)
-
-    datasets = config.get(key, [])
-    logger.info(f"Successfully loaded {len(datasets)} datasets configurations from {path}.")
-    return config
-
-@lru_cache(maxsize=1)
-def get_kafka_config(path,key):
-    """
-    Retrieves Kaggle dataset configurations from a YAML file.
-
-    Returns:
-        dict: The processed configuration dictionary containing dataset details.
-
-    Raises:
-        FileNotFoundError: If the kaggle_dataset.yaml file is not found at the expected project path.
-        yaml.YAMLError: If the configuration file contains invalid YAML syntax.
-    """
-
-    root = Path(__file__).resolve().parents[3]
-    path = root / "config" / path
-
-    if not path.exists():
-        raise FileNotFoundError(f"kafka configuration not found at: {path}")
-
-    logger.info(f"Loading dataset configuration from: {path}")
+    logger.info(f"Accessing config file: {path}")
 
     with open(path, "r") as f:
-        # Reusing the substitution logic in case your Kaggle YAML uses env vars too!
+        # Step 1: Replace ${VAR} placeholders with actual environment variable values
         processed_yaml = _substitute_env_vars(f.read())
+        # Step 2: Parse the processed string into a Python dictionary
         config = yaml.safe_load(processed_yaml)
 
-    datasets = config.get(key, [])
-    logger.info(f"Successfully loaded {len(datasets)} configurations of kafka consumer from {path}.")
+    # Extract the specific configuration data (e.g., list of topics or datasets)
+    data = config.get(key, [])
+    logger.info(f"Successfully retrieved {len(data)} items from {file_name} using key '{key}'.")
+
     return config

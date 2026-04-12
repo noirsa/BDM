@@ -1,0 +1,2 @@
+ingestion_strategy:
+  batch_aggregation_schedule_minutes: 5

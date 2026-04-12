@@ -73,6 +73,7 @@ class CatalogBuilder(BaseDeltalakeLoader):
                             "file_id": filename,
                             "source_type": s3_metadata.get('source'),
                             "file_type": "Image",
+                            "file_path": key,
                             "event_time": _extract_timestamp_from_filename(filename),
                             "record_count": 1,
                             "metadata_blob": json.dumps(metadata_blob),

@@ -6,7 +6,7 @@ are set up in the correct sequence before any data processing tasks begin.
 
 from .env_utils import setup_environment
 from .logging_util import configure_logger, get_logger
-from .load_config import get_minio_config, get_dataset_config, get_kafka_config
+from .load_config import get_minio_config, get_config
 from .minio_client import MinioClient
 from .duckdb_client import MinioDuckDB
 from .parsers import ImageParser
@@ -23,9 +23,10 @@ log = get_logger(__name__)
 # 4. Load the configuration and pass the logger for tracking
 # The @lru_cache in get_minio_config ensures this only runs once
 minio_config = get_minio_config()['minio']
-kaggle_config = get_dataset_config("kaggle_dataset.yaml","kaggle_dataset")['kaggle_dataset']
-huggingface_config = get_dataset_config("huggingface_dataset.yaml","huggingface_dataset")['huggingface_dataset']
-kafka_config = get_kafka_config("kafka.yaml","kafka_consumer")['kafka_consumer']
+kaggle_config = get_config("kaggle_dataset.yaml","kaggle_dataset")['kaggle_dataset']
+huggingface_config = get_config("huggingface_dataset.yaml","huggingface_dataset")['huggingface_dataset']
+kafka_config = get_config("kafka.yaml","kafka_consumer")['kafka_consumer']
+stream_config = get_config("stream_ingestion_config.yaml","ingestion_strategy")['ingestion_strategy']
 log.info("Utility package initialized successfully.")
 
 storage_options = {

@@ -35,5 +35,5 @@ class CSVDeltalakeLoader(BaseDeltalakeLoader):
             self.logger.info(f"CHECK PATH: '{target_delta_folder}'")
             processed = self.duckdb_client.final_verification(f"s3://{bucket}/{key}",target_delta_folder)
             if processed:
-                self.minio_client.mark_as_processed(bucket, key)
+                self.minio_client.delete_object(bucket, key)
             self.logger.debug(f"Processed: {dataset_name} {processed}...")

@@ -1,20 +1,40 @@
 from airflow.decorators import dag, task
 from datetime import datetime, timedelta, timezone
 import os
-from src.utils import kafka_config
+from src.utils import kafka_config,stream_config
 
 KAFKA_BROKERS    = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
-
+schedule_time = stream_config.get("batch_aggregation_schedule_minutes",5)
 @dag(
     dag_id='ingest_kafka_dataset',
     is_paused_upon_creation=False,
 
-    schedule=timedelta(minutes=5),
+    schedule=timedelta(minutes=schedule_time),
     start_date=datetime.now(tz=timezone.utc) - timedelta(hours=1),
     catchup=False,
     tags=["ingest", "kafka", "delta-lake", "aggregation"]
 )
 def ingest_kafka_dataset():
+
+    @task(retries=60, retry_delay=timedelta(seconds=60))
+    def wait_for_infra_ready_task(**context):
+        from src import minio_client
+        from src.utils import get_logger
+
+        logger = get_logger(context.get("task_id"))
+
+        try:
+            logger.info("Checking MinIO bucket existence...")
+
+            minio_client.client.head_bucket(Bucket="landing-zone")
+
+            logger.info("Infra ready (bucket exists).")
+            return True
+
+        except Exception as e:
+            logger.exception("Infra not ready")
+            raise
+    wait_for_infra = wait_for_infra_ready_task()
     @task()
     def consume_and_store(config) -> dict:
 
@@ -62,7 +82,7 @@ def ingest_kafka_dataset():
     if kafka_config:
         # Using .override() is the SDK way to set dynamic task IDs
         ingest_instance_kafka = consume_and_store.expand(config=kafka_config)
-
+        wait_for_infra >> ingest_instance_kafka
 
 ingest_kafka_dataset()
 

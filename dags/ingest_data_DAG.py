@@ -22,26 +22,21 @@ def ingest_dataset_dag():
 
     @task(retries=60, retry_delay=timedelta(seconds=60))
     def wait_for_infra_ready_task(**context):
-        ti = context['ti']
+        from src import minio_client
+        from src.utils import get_logger
 
-        # Pull all prior XComs from this task
-        xcom_values = ti.xcom_pull(
-            dag_id='infra_daily_integrity_check',
-            task_ids='verify_minio_buckets',
-            key='return_value',
-            include_prior_dates=True  # fetch all previous XComs
-        )
+        logger = get_logger(context.get("task_id"))
 
-        if not xcom_values:
-            raise ValueError("No XComs found yet for infra DAG")
+        try:
+            logger.info("Checking MinIO bucket existence...")
 
-        # Get the last XCom (the latest successful run)
-        last_value = xcom_values[-1]
+            minio_client.client.head_bucket(Bucket="landing-zone")
 
-        if last_value == "Infrastructure Ready":
-            return True
-        else:
-            raise ValueError(f"Infrastructure DAG not ready yet, got {last_value}")
+            logger.info("Infra ready (bucket exists).")
+
+        except Exception as e:
+            logger.exception("Infra not ready")
+            raise
     wait_for_infra = wait_for_infra_ready_task()
     # 2. Define the task using the new SDK @task decorator
     @task(map_index_template="{{ 'ingest_' + source_config['name'].replace('-', '_') }}")

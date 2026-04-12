@@ -11,7 +11,7 @@ import os
 
 
 @dag(
-    dag_id='daily_catalog_update',
+    dag_id='daily_kafka_data_catalog_update',
     schedule="@daily",
     start_date=datetime(2026, 4, 1),
     catchup=False,
@@ -20,8 +20,14 @@ import os
     tags=["catalog", "metadata"]
 )
 def daily_catalog_update():
+    @task(retries=5, retry_delay=timedelta(minutes=5))
+    def check_catalog_integrity():
+        """Ensure the Delta Lake catalog storage is accessible."""
+        from src import minio_client
+        minio_client.client.head_bucket(Bucket="landing-zone")
+        return True
     @task()
-    def build_catalog_for_day():
+    def build_catalog_by_folder():
         """
         Scan daily JSON files for a specific topic, extract metadata,
         and batch write to a Delta Lake catalog table.
@@ -34,23 +40,38 @@ def daily_catalog_update():
 
         import pandas as pd
         logger = get_logger(__name__)
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y_%m_%d")
+        catalog_path = "s3://landing-zone/persistent-landing/structured/file_catalog/"
+        processed_groups = set()
+        try:
+            dt = DeltaTable(catalog_path, storage_options=storage_options)
+            existing_df = dt.to_pandas(
+                columns=["file_path", "source_type"],
+                filters=[("file_type", "==", "JSON")]
+            )
+
+            if not existing_df.empty:
+                processed_groups = set(existing_df['file_path'])
+                logger.info(f"Detected {len(processed_groups)} folders already in catalog.")
+        except Exception as e:
+            logger.info(f"Catalog table not found or empty, starting fresh. Error: {e}")
         for config in kafka_config:
             name = config["name"]
-            prefix = f"persistent-landing/semistructured/{name}/{yesterday}/"
+            prefix = f"persistent-landing/semistructured/{name}/"
             bucket = "landing-zone"
             paginator = minio_client.client.get_paginator("list_objects_v2")
-            all_metadata = []
             try:
                 pages = paginator.paginate(Bucket=bucket, Prefix=prefix)
+                count = 1
                 for page in pages:
+                    all_metadata = []
+
                     if "Contents" not in page:
                         logger.warning(f"No files found for prefix: {prefix}")
                         continue
 
                     for obj in page.get("Contents", []):
                         file_key = obj["Key"]
-                        if obj['Size'] == 0:
+                        if obj['Size'] == 0 or file_key in processed_groups:
                             continue
 
                         try:
@@ -89,6 +110,7 @@ def daily_catalog_update():
                             # Append to local list for batching
                             all_metadata.append({
                                 "file_id": filename,
+                                "file_path": file_key,
                                 "source_type": name,
                                 "file_type": "JSON",
                                 "event_time": event_time,
@@ -99,28 +121,27 @@ def daily_catalog_update():
 
                         except Exception as file_err:
                             logger.Exception(f"Error processing file {file_key}: {file_err}")
-                if all_metadata:
-                    df = pd.DataFrame(all_metadata)
-                    catalog_path = "s3://landing-zone/persistent-landing/structured/file_catalog/"
+                    if all_metadata:
+                        df = pd.DataFrame(all_metadata)
+                        catalog_path = "s3://landing-zone/persistent-landing/structured/file_catalog/"
 
-                    logger.info(f"Writing {len(all_metadata)} rows to Delta Table at {catalog_path}")
+                        logger.info(f"Writing {len(all_metadata)} rows to Delta Table at {catalog_path}")
 
-                    write_deltalake(
-                        catalog_path,
-                        df,
-                        mode="append",
-                        schema_mode="merge",
-                        # Partitioning by source_type (topic) significantly improves query performance
-                        partition_by=["source_type"],
-                        storage_options=storage_options
-                    )
-                    logger.info(f"Successfully updated catalog for {name}")
-                else:
-                    logger.info(f"No records found to catalog for {name}")
+                        write_deltalake(
+                            catalog_path,
+                            df,
+                            mode="append",
+                            schema_mode="merge",
+                            storage_options=storage_options
+                        )
+                        logger.info(f"Successfully updated catalog for {name} for page {count}")
+                    else:
+                        logger.info(f"No unprocessed records found to catalog for {name} for page {count}")
+                    count += 1
 
             except Exception as e:
                 logger.critical(f"Catalog task failed for topic {name}: {e}")
                 raise  # Re-raise to trigger Airflow retry
-    build_catalog_for_day()
+    check_catalog_integrity() >> build_catalog_by_folder()
 
 daily_catalog_update()
