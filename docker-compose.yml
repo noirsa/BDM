@@ -384,7 +384,7 @@ services:
       - "8888:8888"
     environment:
       # Hardcode the $JUPYTER_TOKEN
-      JUPYTER_TOKEN: ${JUPYTER_TOKEN:-jupyter}
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN:-+}
     volumes:
       - .:/home/jovyan/work
     restart: unless-stopped
