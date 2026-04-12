@@ -23,3 +23,17 @@ docker exec -it bdm-kafka-1 kafka-console-consumer --bootstrap-server kafka:9092
 ```bash
 docker exec -it bdm-kafka-1 kafka-console-consumer --bootstrap-server kafka:9092 --topic airquality-barcelona --from-beginning
 ```
+
+### Airflow workflow
+
+* **Credentials**
+  - **Username**: `airflow`
+  - **Password**: `airflow`
+* **infra_daily_integrity_check**: Runs automatically every day. However, it can be **manually triggered** in the event of a failure.
+* **Ingestion Pipeline**: 
+    1.  `ingest_dataset` must be triggered manually.
+    2.  Once complete, it automatically triggers `temporal_to_persistent`.
+    3.  Finally, `temporal_to_persistent` triggers `write_deltalake`.
+* **Airflow Tasks**:
+    * Both `daily_kafka_data_catalog_update` and `ingest_kafka_dataset` are scheduled to run when the Airflow service is active.
+    * **Frequency**: The catalog update runs **once daily**, while the dataset ingestion runs **every 5 minutes** by default.
