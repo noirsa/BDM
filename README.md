@@ -49,3 +49,9 @@ docker exec -it bdm-kafka-1 kafka-console-consumer --bootstrap-server kafka:9092
 - `persistent_landing_delta_lake.ipynb`
 - `data_ingestion_streaming.ipynb`
 - `persistent_landing_delta_lake_nonstructured.ipynb`
+### Trusted Zone
+- `trusted_zone.ipynb`
+- `structured_data_cleaning.ipynb`  
+- `semi-structured_data_cleaning.ipynb`  
+- `unstructured_data_cleaning.ipynb`
+- `catalogue_construction.ipynb`

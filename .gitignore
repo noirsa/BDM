@@ -209,3 +209,9 @@ __marimo__/
 
 # MinIO Volume
 data/
+
+# Different local data folders
+milvus_data/
+minio_data/
+mongo_data/
+spark_data/

@@ -378,18 +378,102 @@ services:
     depends_on:
       <<: *airflow-common-depends-on
 
+  spark-master:
+    build:
+      context: ./docker/spark
+      dockerfile: pyspark.Dockerfile      
+    entrypoint: /opt/spark/sbin/start-master.sh
+    environment:
+      SPARK_MASTER_HOST: spark-master
+      SPARK_NO_DAEMONIZE: "true"
+    ports:
+      - "7077:7077"   # Spark master
+      - "8082:8082"   # Spark master Web UI
+
+  spark-worker:
+    build:
+      context: ./docker/spark
+      dockerfile: pyspark.Dockerfile
+    entrypoint: /opt/spark/sbin/start-worker.sh
+    command: ["spark://spark-master:7077"]
+    environment:
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_WORKER_CORES: "2"
+      SPARK_NO_DAEMONIZE: "true"
+    volumes:
+      - ./spark_data:/data
+    depends_on:
+      - spark-master
+
   jupyter:
     build: ./docker/jupyter/
     ports:
       - "8888:8888"
-    environment:
-      # Hardcode the $JUPYTER_TOKEN
-      JUPYTER_TOKEN: ${JUPYTER_TOKEN:-jupyter}
+      - "4040:4040"   # Spark application Web UI
     volumes:
       - .:/home/jovyan/work
+      - ./spark_data:/data
+    restart: unless-stopped
+    environment:
+      JUPYTER_TOKEN: jupyter
+    depends_on:
+      - spark-master
+
+  mongo:
+    image: mongo:7
+    container_name: mongo
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongo
+      MONGO_INITDB_ROOT_PASSWORD: mongo
+    volumes:
+      - ./mongo_data:/data/db
+    restart: unless-stopped
+
+  mongo-express:
+    image: mongo-express:latest
+    container_name: mongo-express
+    ports:
+      - "8083:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: mongo
+      ME_CONFIG_MONGODB_ADMINPASSWORD: mongo
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_BASICAUTH: "false"
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+  milvus:
+    image: milvusdb/milvus:v2.4.0
+    container_name: milvus
+    command: ["milvus", "run", "standalone"]
+    ports:
+      - "19530:19530"   # gRPC
+      - "9091:9091"     # HTTP/metrics
+    volumes:
+      - ./milvus_data:/var/lib/milvus
+    depends_on:
+      - minio
+      - postgres
+    restart: unless-stopped
+
+  attu:
+    image: zilliz/attu:latest
+    container_name: attu
+    ports:
+      - "3000:3000"
+    environment:
+      MILVUS_URL: http://host.docker.internal:19530
+    depends_on:
+      - milvus
     restart: unless-stopped
 
 volumes:
   postgres-db-volume:
   minio_data:
   airflow-logs:
+  mongo_data:
+  clickhouse_data:
+  milvus_data:
