@@ -60,6 +60,12 @@ services:
       - "9001:9001"
     volumes:
       - ./minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 
   postgres:
     image: postgres:16
@@ -69,6 +75,7 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d/
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
@@ -386,9 +393,12 @@ services:
     environment:
       SPARK_MASTER_HOST: spark-master
       SPARK_NO_DAEMONIZE: "true"
+      SPARK_MASTER_OPTS: "-Dspark.deploy.defaultCores=4"
     ports:
       - "7077:7077"   # Spark master
       - "8082:8082"   # Spark master Web UI
+    volumes:
+      - ./huggingface:/opt/spark/hf_cache
 
   spark-worker:
     build:
@@ -397,11 +407,12 @@ services:
     entrypoint: /opt/spark/sbin/start-worker.sh
     command: ["spark://spark-master:7077"]
     environment:
-      SPARK_WORKER_MEMORY: 2g
-      SPARK_WORKER_CORES: "2"
+      SPARK_WORKER_MEMORY: 4g
+      SPARK_WORKER_CORES: "4"
       SPARK_NO_DAEMONIZE: "true"
     volumes:
       - ./spark_data:/data
+      - ./huggingface:/opt/spark/hf_cache
     depends_on:
       - spark-master
 
@@ -413,6 +424,7 @@ services:
     volumes:
       - .:/home/jovyan/work
       - ./spark_data:/data
+      - ./huggingface:/opt/spark/hf_cache
     restart: unless-stopped
     environment:
       JUPYTER_TOKEN: jupyter
@@ -445,30 +457,76 @@ services:
       - mongo
     restart: unless-stopped
 
+ # ── Key-value store ───────────────────────────────────────────────────────────
+  # Milvus uses etcd for cluster coordination and metadata management
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: milvus-etcd
+
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+
+    command: >
+      etcd
+      --advertise-client-urls=http://milvus-etcd:2379
+      --listen-client-urls=http://0.0.0.0:2379
+      --data-dir=/etcd
+
+    volumes:
+      - etcd_data:/etcd
+
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ── Milvus standalone ─────────────────────────────────────────────────────────
+  # Vector database for embeddings and semantic search (movies collection)
   milvus:
-    image: milvusdb/milvus:v2.4.0
+    image: milvusdb/milvus:v2.4.4
     container_name: milvus
     command: ["milvus", "run", "standalone"]
-    ports:
-      - "19530:19530"   # gRPC
-      - "9091:9091"     # HTTP/metrics
-    volumes:
-      - ./milvus_data:/var/lib/milvus
-    depends_on:
-      - minio
-      - postgres
-    restart: unless-stopped
+    environment:
+      ETCD_ENDPOINTS: "milvus-etcd:2379"
+      MINIO_ADDRESS: "minio:9000"
+      MINIO_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
 
+      MINIO_USE_SSL: "false"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+
+  # ── Attu vector search UI ─────────────────────────────────────────────────────
+  # Having an UI is always nice. Not necessary, just nice :)
   attu:
-    image: zilliz/attu:latest
-    container_name: attu
+    image: zilliz/attu:v3.0.0-beta.1
     ports:
       - "3000:3000"
     environment:
-      MILVUS_URL: http://host.docker.internal:19530
+      - MILVUS_ADDRESS=milvus:19530
+    volumes:
+      - attu_data:/data
     depends_on:
       - milvus
-    restart: unless-stopped
+
 
   postgres-analytics:
     image: postgres:16
@@ -506,4 +564,7 @@ volumes:
   mongo_data:
   clickhouse_data:
   milvus_data:
+  attu_data:
+  etcd_data:
+  huggingface:
   postgres-analytics:

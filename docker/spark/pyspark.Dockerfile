@@ -22,7 +22,10 @@ RUN python3.13 -m pip install --no-cache-dir \
     boto3 \
     pillow \
     numpy \
-    pandas
+    pandas \
+    torch \
+    transformers \
+    pymilvus
 
 ENV PYSPARK_PYTHON=/usr/bin/python3.13
 ENV PYSPARK_DRIVER_PYTHON=/usr/bin/python3.13
