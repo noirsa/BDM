@@ -470,6 +470,35 @@ services:
       - milvus
     restart: unless-stopped
 
+  postgres-analytics:
+    image: postgres:16
+    container_name: postgres-analytics
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset
+      POSTGRES_DB: analytics
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-analytics:/var/lib/postgresql/data
+  superset:
+    build: ./docker/superset/
+    container_name: superset
+    ports:
+      - "8088:8088"
+    environment:
+      SUPERSET_SECRET_KEY: "your_secret_key"
+      SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://superset:superset@postgres-analytics:5432/analytics
+    depends_on:
+      - postgres-analytics
+    command: >
+      /bin/bash -c "
+      superset db upgrade &&
+      superset fab create-admin --username superset --firstname Superset --lastname Admin --email admin@superset.com --password superset &&
+      superset init &&
+      superset run -h 0.0.0.0 -p 8088
+      "
+
 volumes:
   postgres-db-volume:
   minio_data:
@@ -477,3 +506,4 @@ volumes:
   mongo_data:
   clickhouse_data:
   milvus_data:
+  postgres-analytics:
