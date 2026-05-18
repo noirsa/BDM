@@ -557,6 +557,24 @@ services:
       superset run -h 0.0.0.0 -p 8088
       "
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.2-alpine
+    container_name: clickhouse-server
+    ports:
+      - "8123:8123"
+      - "9005:9000"
+    environment:
+      - CLICKHOUSE_USER=analytics
+      - CLICKHOUSE_PASSWORD=analytics_secret
+      - CLICKHOUSE_DB=bi_analytics
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    restart: unless-stopped
+
 volumes:
   postgres-db-volume:
   minio_data:
