@@ -25,7 +25,8 @@ RUN python3.13 -m pip install --no-cache-dir \
     pandas \
     torch \
     transformers \
-    pymilvus
+    pymilvus \
+    clickhouse_connect
 
 ENV PYSPARK_PYTHON=/usr/bin/python3.13
 ENV PYSPARK_DRIVER_PYTHON=/usr/bin/python3.13
