@@ -1,9 +1,11 @@
 from airflow.sdk import dag, task
 from datetime import datetime, timedelta
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
-from src.utils import kaggle_config,huggingface_config
+from src.utils import load_kaggle_config, load_huggingface_config
 # Standard providers are still imported this way
 
+kaggle_config = load_kaggle_config()
+huggingface_config = load_huggingface_config()
 
 
 
@@ -22,9 +24,10 @@ def ingest_dataset_dag():
 
     @task(retries=60, retry_delay=timedelta(seconds=60))
     def wait_for_infra_ready_task(**context):
-        from src import minio_client
+        from src import get_minio_client
         from src.utils import get_logger
 
+        minio_client = get_minio_client()
         logger = get_logger(context.get("task_id"))
 
         try:
@@ -40,12 +43,15 @@ def ingest_dataset_dag():
     wait_for_infra = wait_for_infra_ready_task()
     # 2. Define the task using the new SDK @task decorator
     @task(map_index_template="{{ 'ingest_' + source_config['name'].replace('-', '_') }}")
-    def run_kaggle_ingest(source_config: dict):
+    def run_kaggle_ingest(source_config: dict, **context):
         from src.utils import get_logger
+        from src.utils.time_anchor import logical_date_from_context
         from src.dataloader.kaggle_loader import KaggleLoader
-        from src import minio_client
+        from src import get_minio_client
+        minio_client = get_minio_client()
         loader = KaggleLoader(minio_client)
         logger = get_logger(__name__)
+        logical_date = logical_date_from_context(context)
         logger.info(f"Processing dataset: {source_config['name']}")
 
         if source_config.get('type') == "csv":
@@ -53,12 +59,18 @@ def ingest_dataset_dag():
                 handle=source_config['handle'],
                 file_name=source_config['file'],
                 name=source_config['name'],
+                object_name=source_config.get('object_name'),
+                table_name=source_config.get('table_name'),
+                expected_rows=source_config.get('expected_rows'),
+                expected_columns=source_config.get('expected_columns'),
+                logical_date=logical_date,
                 **source_config.get('params', {})
             )
         elif source_config.get('type') == "image":
             loader.fetch_and_upload_image(
                 handle=source_config['handle'],
                 name=source_config['name'],
+                logical_date=logical_date,
             )
         else:
             logger.info(f"currently not supported: {source_config['name']}")
@@ -75,12 +87,15 @@ def ingest_dataset_dag():
 
 
     @task(map_index_template="{{ 'ingest_' + source_config['name'].replace('-', '_') }}")
-    def run_huggingface_ingest(source_config: dict):
+    def run_huggingface_ingest(source_config: dict, **context):
         from src.utils import get_logger
+        from src.utils.time_anchor import logical_date_from_context
         from src.dataloader.huggingface_loader import HuggingfaceDataLoader
-        from src import minio_client
+        from src import get_minio_client
+        minio_client = get_minio_client()
         loader = HuggingfaceDataLoader(minio_client)
         logger = get_logger(__name__)
+        logical_date = logical_date_from_context(context)
         logger.info(f"Processing dataset: {source_config['name']}")
 
         if source_config.get('type') == "csv":
@@ -89,6 +104,11 @@ def ingest_dataset_dag():
                 name=source_config['name'],
                 split= source_config['split'],
                 file_type=source_config['type'],
+                object_name=source_config.get('object_name'),
+                table_name=source_config.get('table_name'),
+                expected_rows=source_config.get('expected_rows'),
+                expected_columns=source_config.get('expected_columns'),
+                logical_date=logical_date,
             )
 
         else:
@@ -104,7 +124,10 @@ def ingest_dataset_dag():
     trigger_move = TriggerDagRunOperator(
         task_id='trigger_persistent_move',
         trigger_dag_id='temporal_to_persistent',
-        conf={"trigger_source": "auto_ingest"},  # Signal for automated buffer
+        conf={
+            "trigger_source": "auto_ingest",
+            "source_logical_date": "{{ logical_date.isoformat() }}",
+        },
         wait_for_completion=False,
     )
 

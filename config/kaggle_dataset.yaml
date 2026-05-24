@@ -3,16 +3,29 @@ kaggle_dataset:
     type: "csv"
     handle: "ankushpanday1/global-warming-dataset-195-countries-1900-2023"
     file: "global_warming_dataset.csv"
+    object_name: "global_warming_dataset.csv"
+    table_name: "global_warming_dataset"
+    expected_rows: 100000
+    expected_columns: 26
 
   - name: "co2_emission_by_vehicles"
     type: "csv"
     handle: "debajyotipodder/co2-emission-by-vehicles"
     file: "CO2 Emissions_Canada.csv"
+    object_name: "co2-emission-by-vehicles.csv"
+    table_name: "co2-emission-by-vehicles"
+    expected_rows: 7385
+    expected_columns: 12
 
   - name: "temperature_change"
     type: "csv"
     handle: "sevgisarac/temperature-change"
-    file: "Environment_Temperature_change_E_All_Data_NOFLAG.csv"
+    # Explicit file selection: do not fall back to the first CSV in the archive.
+    file: "FAOSTAT_data_en_11-1-2024.csv"
+    object_name: "temperature_change.csv"
+    table_name: "temperature_change"
+    expected_rows: 241893
+    expected_columns: 14
     params:
       encoding: "latin-1"
 

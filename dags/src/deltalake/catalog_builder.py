@@ -5,13 +5,14 @@ from datetime import datetime
 from deltalake import DeltaTable, write_deltalake
 import polars as pl
 from .base_deltalakeloader import BaseDeltalakeLoader
-from ..utils import ImageParser
+from src.catalog import ImageMetadataExtractor
+from src.utils.time_anchor import coerce_logical_date
 import os
 import json
 import pandas as pd
 
 
-def _extract_timestamp_from_filename(filename):
+def _extract_timestamp_from_filename(filename, fallback_logical_date):
     # Strip extension and split by underscore
     name_part = os.path.splitext(filename)[0]
     raw_ts = name_part.split('_')[-1]
@@ -22,12 +23,12 @@ def _extract_timestamp_from_filename(filename):
         return dt_object
     except (ValueError, IndexError):
         # Fallback if the filename doesn't follow the pattern
-        return datetime.now()
+        return coerce_logical_date(fallback_logical_date)
 
 
 class CatalogBuilder(BaseDeltalakeLoader):
 
-    def run_image_ingestion(self, bucket, prefix, target_path):
+    def run_image_ingestion(self, bucket, prefix, target_path, logical_date):
         """
         Executes a specialized ingestion task to catalog image files.
         It scans the S3 prefix, extracts technical metadata using an external parser,
@@ -43,10 +44,10 @@ class CatalogBuilder(BaseDeltalakeLoader):
         try:
 
             paginator = self.minio_client.client.get_paginator("list_objects_v2")
-            processed_keys = []
             for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
 
                 page_records = []
+                processed_keys = []
                 for obj in page.get("Contents", []):
                     key = obj["Key"]
 
@@ -62,9 +63,9 @@ class CatalogBuilder(BaseDeltalakeLoader):
                         if s3_metadata.get("status") == "processed":
                             self.logger.debug(f"Skipping already processed file: {key}")
                             continue
-                        # Extract technical metadata via external ImageParser
+                        # Extract technical metadata via the catalog extractor.
                         # Expected to return a dict with: width, height, md5, etc.
-                        metadata_blob = ImageParser.to_metadata_blob(content, s3_metadata, "image")
+                        metadata_blob = ImageMetadataExtractor.to_metadata_blob(content, s3_metadata, "image")
 
 
                         # Construct the standardized Catalog Row
@@ -74,10 +75,10 @@ class CatalogBuilder(BaseDeltalakeLoader):
                             "source_type": s3_metadata.get('source'),
                             "file_type": "Image",
                             "file_path": key,
-                            "event_time": _extract_timestamp_from_filename(filename),
+                            "event_time": _extract_timestamp_from_filename(filename, logical_date),
                             "record_count": 1,
                             "metadata_blob": json.dumps(metadata_blob),
-                            "processed_at": pd.Timestamp.now()
+                            "processed_at": pd.Timestamp(coerce_logical_date(logical_date))
                         }
                         page_records.append(record)
                         self.logger.debug(f"Processed image: {filename}")
@@ -90,7 +91,7 @@ class CatalogBuilder(BaseDeltalakeLoader):
                 if page_records:
                     metadata_df = pd.DataFrame(page_records)
                     write_deltalake(
-                        "s3://landing-zone/persistent-landing/structured/file_catalog/",
+                        target_path if target_path.startswith("s3://") else f"s3://{target_path}",
                         metadata_df,
                         mode="append",
                         schema_mode="merge",

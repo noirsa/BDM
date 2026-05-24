@@ -1,8 +1,9 @@
-import time
-
 from datasets import load_dataset
 import io
+from pathlib import Path
 from .base_loader import BaseDataLoader
+from .validation import DatasetValidationSpec
+from src.utils.time_anchor import logical_date_iso, logical_date_suffix
 
 
 class HuggingfaceDataLoader(BaseDataLoader):
@@ -23,7 +24,18 @@ class HuggingfaceDataLoader(BaseDataLoader):
 
     """
 
-    def fetch_and_upload(self, path, name=None, split='train', file_type='csv'):
+    def fetch_and_upload(
+        self,
+        path,
+        name=None,
+        split='train',
+        file_type='csv',
+        object_name=None,
+        table_name=None,
+        expected_rows=None,
+        expected_columns=None,
+        logical_date=None,
+    ):
 
 
 
@@ -47,26 +59,54 @@ class HuggingfaceDataLoader(BaseDataLoader):
             if df.shape[1] == 0:
                 raise ValueError("No columns found in dataset")
 
-            metadata={"hf_path": path, "split": split}
+            validation = DatasetValidationSpec(
+                dataset_name=name or path,
+                source_file=path,
+                expected_rows=expected_rows,
+                expected_columns=expected_columns,
+            )
+            validation.validate_dataframe(df, self.logger)
+
+            default_suffix = "csv" if file_type == "csv" else "parquet"
+            landing_name = object_name or f"{name}.{default_suffix}"
+            delta_table_name = table_name or Path(landing_name).stem
+            landing_path = Path(landing_name)
+            run_suffix = logical_date_suffix(logical_date)
+            timestamped_object_name = f"{landing_path.stem}_{run_suffix}{landing_path.suffix or '.csv'}"
+
+            metadata = {
+                "source": "huggingface",
+                "hf_path": path,
+                "split": split,
+                "dataset_name": name or path,
+                "table_name": delta_table_name,
+                "landing_name": landing_name,
+                "logical_date": logical_date_iso(logical_date),
+                "expected_rows": str(expected_rows or ""),
+                "expected_columns": str(expected_columns or ""),
+            }
 
             self.logger.info(f"Successfully loaded {path} into DataFrame.")
 
             if file_type == 'csv':
-                df.to_csv(buffer, index=False, encoding='utf-8')
-                content_type = 'text/csv'
+                self.logger.info(f"Uploading {path} to MinIO as {timestamped_object_name}...")
+                self.upload_csv(
+                    df=df,
+                    object_name=timestamped_object_name,
+                    metadata=metadata,
+                    content_type='text/csv'
+                )
             else:
                 df.to_parquet(buffer, index=False)
-                content_type = 'application/x-parquet'
-
-            # Generate timestamped object name
-            timestamp = int(time.time())
-            self.logger.info(f"Uploading {path} to MinIO...")
-            self.upload_csv(
-                df=df,
-                object_name = f"{name}_{timestamp}.csv",
-                metadata=metadata,
-                content_type=content_type
-            )
+                object_key = f"temporal-landing/{timestamped_object_name}"
+                self.logger.info(f"Uploading {path} to MinIO as {object_key}...")
+                self.upload_file(
+                    bucket_name="landing-zone",
+                    object_key=object_key,
+                    content=buffer.getvalue(),
+                    content_type='application/x-parquet',
+                    metadata=metadata,
+                )
 
 
 

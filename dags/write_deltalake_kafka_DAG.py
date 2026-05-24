@@ -23,22 +23,29 @@ def daily_catalog_update():
     @task(retries=5, retry_delay=timedelta(minutes=5))
     def check_catalog_integrity():
         """Ensure the Delta Lake catalog storage is accessible."""
-        from src import minio_client
+        from src import get_minio_client
+        minio_client = get_minio_client()
         minio_client.client.head_bucket(Bucket="landing-zone")
         return True
     @task()
-    def build_catalog_by_folder():
+    def build_catalog_by_folder(**context):
         """
         Scan daily JSON files for a specific topic, extract metadata,
         and batch write to a Delta Lake catalog table.
         """
-        from src.utils import kafka_config,storage_options
-        from src import minio_client
-        from src.utils import get_logger,get_deep_keys
+        from src.utils import load_kafka_config, get_storage_options
+        from src import get_minio_client
+        from src.utils import get_logger
+        from src.utils.time_anchor import logical_date_from_context
+        from src.catalog.json_metadata import get_deep_keys
         import json
         from deltalake import DeltaTable, write_deltalake
 
         import pandas as pd
+        minio_client = get_minio_client()
+        kafka_config = load_kafka_config()
+        storage_options = get_storage_options()
+        logical_date = logical_date_from_context(context)
         logger = get_logger(__name__)
         catalog_path = "s3://landing-zone/persistent-landing/structured/file_catalog/"
         processed_groups = set()
@@ -90,15 +97,9 @@ def daily_catalog_update():
                                                  (sublist if isinstance(sublist, list) else [sublist])]
                             record_count = len(temp_data)
 
-                            # Parse Event Time from filename (expects timestamp at the end)
+                            # Use object storage time; Kafka filenames are offset-based for retry idempotency.
                             filename = os.path.basename(file_key)
-                            try:
-                                # Example filename: 2026_04_06_1712415600.json
-                                raw_ts = os.path.splitext(filename)[0].split('_')[-1]
-                                event_time = datetime.fromtimestamp(int(raw_ts))
-                            except Exception as ts_err:
-                                logger.error(f"Failed to parse timestamp from {filename}: {ts_err}")
-                                event_time = datetime.now()
+                            event_time = obj.get("LastModified") or logical_date
 
                             # Construct the metadata blob (JSON string for flexible schema)
                             metadata_blob = {
@@ -116,11 +117,11 @@ def daily_catalog_update():
                                 "event_time": event_time,
                                 "record_count": record_count,
                                 "metadata_blob": json.dumps(metadata_blob),
-                                "processed_at": pd.Timestamp.now()
+                                "processed_at": pd.Timestamp(logical_date)
                             })
 
                         except Exception as file_err:
-                            logger.Exception(f"Error processing file {file_key}: {file_err}")
+                            logger.exception(f"Error processing file {file_key}: {file_err}")
                     if all_metadata:
                         df = pd.DataFrame(all_metadata)
                         catalog_path = "s3://landing-zone/persistent-landing/structured/file_catalog/"

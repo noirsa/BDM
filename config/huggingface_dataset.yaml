@@ -3,3 +3,7 @@ huggingface_dataset:
     path: "nlp-pw/Natural_disaster_tweets"
     split: "train"
     type: "csv"
+    object_name: "natural_disaster_tweets.csv"
+    table_name: "natural_disaster_tweets"
+    expected_rows: 127593
+    expected_columns: 5

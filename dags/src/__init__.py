@@ -1,4 +1,10 @@
-from .utils import MinioClient, MinioDuckDB
+def get_minio_client():
+    from .utils.minio_client import MinioClient
 
-minio_client = MinioClient()
-duckdb_client = MinioDuckDB()
+    return MinioClient()
+
+
+def get_duckdb_client():
+    from .utils.duckdb_client import MinioDuckDB
+
+    return MinioDuckDB()

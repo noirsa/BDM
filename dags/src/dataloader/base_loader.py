@@ -41,7 +41,13 @@ class BaseDataLoader(object):
         if metadata is None:
             metadata = {}
 
-        self.minio_client.upload_file(bucket_name, full_object_path, csv_buffer.getvalue(),content_type=content_type, metadata=metadata)
+        self.minio_client.upload_file_atomic(
+            bucket_name,
+            full_object_path,
+            csv_buffer.getvalue(),
+            content_type=content_type,
+            metadata=metadata,
+        )
 
     def upload_file(self, bucket_name, object_key, content, content_type=None, metadata=None):
         """
@@ -62,7 +68,13 @@ class BaseDataLoader(object):
 
         """
 
-        self.minio_client.upload_file(bucket_name, object_key, content, content_type=content_type, metadata=metadata)
+        self.minio_client.upload_file_atomic(
+            bucket_name,
+            object_key,
+            content,
+            content_type=content_type,
+            metadata=metadata,
+        )
 
 
 

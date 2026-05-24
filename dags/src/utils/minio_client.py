@@ -1,14 +1,12 @@
-import time
-from sys import prefix
-
 import boto3
 from botocore.exceptions import ClientError
-import os
 
-from . import  get_logger, get_minio_config
-minio_config = get_minio_config()['minio']
+from .logging_util import get_logger
+from .load_config import get_minio_config
 
 log = get_logger(__name__)
+
+
 class MinioClient:
     """
     Handles interactions with MinIO storage.
@@ -24,7 +22,7 @@ class MinioClient:
         logger: Logger instance for tracking operations
         """
         self.logger = log
-        self.minio_config = minio_config
+        self.minio_config = get_minio_config()['minio']
         # Extract values from the centralized config
         self.client = (  boto3.client(
                 "s3",
@@ -140,8 +138,6 @@ class MinioClient:
         Uploads data to MinIO bucket.
         """
         try:
-            # 4. Upload to MinIO
-            # We use .getvalue() to get the byte content of the buffer
             self.client.put_object(
                 Bucket=bucket_name,
                 Key=object_key,
@@ -154,6 +150,33 @@ class MinioClient:
         except ClientError as e:
             self.logger.error(f"Failed to upload  {content_type} file to '{object_key}' to bucket '{bucket_name}': {e}")
             # Re-raise the exception so the Airflow task knows it failed
+            raise
+
+    def upload_file_atomic(self, bucket_name, object_key, body, content_type='application/octet-stream', metadata=None):
+        """
+        Publish an object through a deterministic temporary key.
+
+        Retries overwrite the same temp/final keys, so a worker crash during upload cannot
+        leave a partially published landing-zone object with the final name.
+        """
+        temp_key = f"_tmp/{object_key}"
+        try:
+            self.logger.info("Uploading temporary object %s/%s", bucket_name, temp_key)
+            self.upload_file(bucket_name, temp_key, body, content_type=content_type, metadata=metadata)
+
+            self.logger.info("Publishing temporary object %s to final key %s", temp_key, object_key)
+            self.client.copy_object(
+                Bucket=bucket_name,
+                CopySource={"Bucket": bucket_name, "Key": temp_key},
+                Key=object_key,
+                Metadata=metadata or {},
+                ContentType=content_type,
+                MetadataDirective="REPLACE",
+            )
+            self.client.delete_object(Bucket=bucket_name, Key=temp_key)
+            self.logger.info("Atomically published %s/%s", bucket_name, object_key)
+        except ClientError:
+            self.logger.exception("Atomic upload failed for %s/%s", bucket_name, object_key)
             raise
 
     def _move_file(self, source_bucket, source_key, destination_bucket, destination_key):
@@ -200,7 +223,7 @@ class MinioClient:
         else:
             return "structured"
 
-    def move_bucket(self, source_bucket,source_prefix, destination_bucket,destination_prefix=None):
+    def move_bucket(self, source_bucket,source_prefix, destination_bucket,destination_prefix=None, logical_date=None):
         """
             Iterates through a source prefix, classifies each object, and moves it to a structured
             or unstructured landing zone in the destination bucket.
@@ -220,44 +243,10 @@ class MinioClient:
                 ClientError: If S3 operations (listing, head, copy, or delete) fail.
                 Exception: For any unexpected processing errors.
             """
-        paginator = self.client.get_paginator("list_objects_v2")
-        count = 1
-        for page in paginator.paginate(Bucket=source_bucket, Prefix=source_prefix):
-            for obj in page.get("Contents", []):
-                try:
-                    src_key = obj["Key"]
+        from src.landing_zone import LandingZoneRouter
 
-                    # skip folder
-                    if obj['Size'] == 0 and src_key.endswith("/"):
-                        continue
-
-                    # classify
-                    category = self._classify_object_by_head(source_bucket, src_key)
-                    # get file extension
-                    ext = src_key.split('.')[-1].split('?')[0]
-                    # new filename = timestamp + original extension
-                    ts = int(time.time() * 1000)  # milliseconds
-                    if category == "structured":
-                        filename = os.path.splitext(os.path.basename(src_key))[0].split("_")
-                        filename[-1] = str(ts)
-                        filename = "_".join(filename)
-                        new_filename = f"{filename}.{ext}"
-
-                    else:
-                        new_filename = f"{category}_{ts}.{ext}"
-
-                    if category == "image":
-                        category = "unstructured/" + category
-                    elif category == "structured":
-                        category = "structured/raw"
-                    dest_key = f"{destination_prefix}{category}/{new_filename}"
-                    self.logger.debug(f"Moved: {src_key} -> {dest_key}")
-                    self._move_file(source_bucket, src_key,destination_bucket, dest_key)
-                except ClientError as e:
-                    self.logger.exception(f"S3 Error during bucket move for {src_key}: {e}")
-                    raise
-            self.logger.info(f"Successfully routed page {count} of {source_bucket}/{source_prefix} to {destination_bucket}/{destination_prefix}")
-            count += 1
+        router = LandingZoneRouter(self)
+        router.route(source_bucket, source_prefix, destination_bucket, destination_prefix or "", logical_date)
 
     def get_pending_keys(self, bucket, prefix):
         """

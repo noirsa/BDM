@@ -1,4 +1,4 @@
-from ..utils import storage_options
+from ..utils import get_storage_options
 
 from ..utils import get_logger
 
@@ -11,4 +11,4 @@ class BaseDeltalakeLoader:
         self.minio_client = minio_client
         self.logger.info(f"{self.__class__.__name__} service initialized.")
         self.duckdb_client= duckdb_client
-        self.storage_options = storage_options
+        self.storage_options = get_storage_options()

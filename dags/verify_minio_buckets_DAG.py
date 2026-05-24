@@ -43,7 +43,8 @@ def infrastructure_maintenance():
             logger.info("Initializing MinIO client for integrity check.")
 
             # 1. Initialize the storage client
-            from src import minio_client
+            from src import get_minio_client
+            minio_client = get_minio_client()
 
             # 2. Ensure bucket hierarchy exists as per minio.yaml
             logger.info("Verifying bucket existence and permissions...")

@@ -1,12 +1,12 @@
 import duckdb
-from . import  get_logger, get_minio_config
-
-minio_config = get_minio_config()['minio']
+from .logging_util import get_logger
+from .load_config import get_minio_config
 
 logger = get_logger(__name__)
 
 class MinioDuckDB:
     def __init__(self):
+        minio_config = get_minio_config()['minio']
         self.endpoint = minio_config["endpoint"]
         self.access_key = minio_config["access_key"]
         self.secret_key = minio_config["secret_key"]
@@ -54,7 +54,11 @@ class MinioDuckDB:
 
         sql = f"""
             COPY (
-                SELECT * FROM read_csv_auto('s3://{bucket}/{src_s3_path}', sample_size=200000)
+                SELECT * FROM read_csv_auto(
+                    's3://{bucket}/{src_s3_path}',
+                    sample_size=200000,
+                    hive_partitioning=false
+                )
             ) TO 's3://{bucket}/{dest_s3_path}' (FORMAT 'PARQUET', COMPRESSION 'SNAPPY');
         """
 
@@ -62,71 +66,25 @@ class MinioDuckDB:
 
     def final_verification(self, original_csv, delta_table_path):
         """
-        Ultimate Zero-Schema Data Integrity Verification.
-
-        This method is 'Order-Agnostic' (works regardless of row order) and
-        'Type-Agnostic' (standardizes data to VARCHAR for comparison).
+        Verify raw CSV and Delta contents before the raw file is deleted.
         """
-        logger.info("--- Starting Ultimate Verification (Zero-Schema) ---")
+        logger.info("--- Starting CSV to Delta verification ---")
 
-        # Ensure the Delta extension is ready for DuckDB
         try:
             self.con.execute("INSTALL delta; LOAD delta;")
         except Exception as e:
             logger.warning(f"Delta extension might already be loaded: {e}")
 
         try:
-            # STEP 1: Structural Validation
-            # We use DESCRIBE to count columns to avoid issues with specific data types.
-            # We use delta_scan() to ensure we only count 'active' data in the Lakehouse.
-            structure_sql = f"""
-                SELECT 
-                    (SELECT count(*) FROM read_csv_auto('{original_csv}')) as csv_rows,
-                    (SELECT count(*) FROM delta_scan('{delta_table_path}')) as delta_rows,
-                    (SELECT count(*) FROM (DESCRIBE SELECT * FROM read_csv_auto('{original_csv}'))) as csv_cols,
-                    (SELECT count(*) FROM (DESCRIBE SELECT * FROM delta_scan('{delta_table_path}'))) as delta_cols
-            """
-            res = self.con.execute(structure_sql).fetchone()
-            csv_rows, delta_rows, csv_cols, delta_cols = res
+            from src.deltalake.integrity import DataIntegrityVerifier
 
-            if csv_rows != delta_rows or csv_cols != delta_cols:
-                logger.error(
-                    f"Structural Mismatch! [Rows] CSV: {csv_rows} vs Delta: {delta_rows} | "
-                    f"[Cols] CSV: {csv_cols} vs Delta: {delta_cols}"
-                )
-                return False
-
-            # STEP 2: Deep Content Inspection (Fingerprinting)
-            # Logic:
-            # a) Cast all columns to VARCHAR to standardize (removes storage format differences).
-            # b) Hash each row to create a 'digital signature'.
-            # c) Use BIT_XOR to aggregate all hashes. XOR is commutative (A^B = B^A),
-            #    so the result is identical even if the rows are in a different order.
-            # d) COALESCE handles NULL values so they don't break the string concatenation.
-
-            fingerprint_sql = f"""
-                WITH csv_signature AS (
-                    SELECT bit_xor(hash(coalesce(columns(*)::VARCHAR, 'NULL'))) as sign
-                    FROM read_csv_auto('{original_csv}')
-                ),
-                delta_signature AS (
-                    SELECT bit_xor(hash(coalesce(columns(*)::VARCHAR, 'NULL'))) as sign
-                    FROM delta_scan('{delta_table_path}')
-                )
-                SELECT csv_signature.sign == delta_signature.sign 
-                FROM csv_signature, delta_signature
-            """
-
-            is_identical = self.con.execute(fingerprint_sql).fetchone()[0]
-
-            if not is_identical:
-                logger.error("Data Integrity Failed, Content fingerprints do not match (data corruption or drift).")
-                # Pro tip: If this fails, it's often due to floating point precision (0.666 vs 0.6666667)
-                return False
-
-            logger.info(f"Verification Passed, Confirmed {csv_rows} rows and {csv_cols} columns are identical.")
-            return True
+            verifier = DataIntegrityVerifier(self.con)
+            return verifier.verify_csv_matches_delta(original_csv, delta_table_path)
 
         except Exception as e:
-            logger.error(f"Verification process crashed: {str(e)}")
+            error_message = str(e)
+            if "MissingVersionError" in error_message or "No table version found" in error_message:
+                logger.info("Delta table is not readable yet; conversion is required. Details: %s", error_message)
+            else:
+                logger.error(f"Verification process crashed: {error_message}")
             return False

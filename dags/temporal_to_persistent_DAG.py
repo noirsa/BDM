@@ -10,8 +10,9 @@ from airflow.sensors.time_delta import TimeDeltaSensor
 
 def poke_minio_for_real_data(**context):
     from src.utils import get_logger
-    from src import minio_client
+    from src import get_minio_client
 
+    minio_client = get_minio_client()
     conf = context.get('dag_run').conf or {}
     source = "Automated" if conf.get('trigger_source') == 'auto_ingest' else "Manual"
     logger = get_logger(context.get('task_id'))
@@ -74,14 +75,17 @@ def temporal_to_persistent_dag():
 
     # This task encapsulates the business logic for sorting files.
     @task(trigger_rule='none_failed_min_one_success')
-    def move_data_task():
+    def move_data_task(**context):
         """
             Executes the move_bucket operation to sort files into
-            structured/raw or unstructured/image directories.
+            structured/raw, unstructured/image, or semistructured directories.
         """
         from src.utils import get_logger
-        from src import minio_client
+        from src.utils.time_anchor import logical_date_from_context
+        from src import get_minio_client
 
+        minio_client = get_minio_client()
+        logical_date = logical_date_from_context(context)
         logger = get_logger("move_data_task")
 
         logger.info("Executing bucket migration and classification logic.")
@@ -90,7 +94,8 @@ def temporal_to_persistent_dag():
             source_bucket='landing-zone',
             source_prefix='temporal-landing/',
             destination_bucket='landing-zone',
-            destination_prefix='persistent-landing/'
+            destination_prefix='persistent-landing/',
+            logical_date=logical_date,
         )
 
         return "move complete."
@@ -98,7 +103,10 @@ def temporal_to_persistent_dag():
     trigger_delta_write = TriggerDagRunOperator(
         task_id='trigger_deltalake_write',
         trigger_dag_id='write_deltalake',
-        conf={"trigger_source": "temporal_to_persistent_flow"},
+        conf={
+            "trigger_source": "temporal_to_persistent_flow",
+            "source_logical_date": "{{ (dag_run.conf or {}).get('source_logical_date') or logical_date.isoformat() }}",
+        },
         wait_for_completion=False,
     )
 

@@ -36,10 +36,14 @@ def write_deltalake_dag():
     )
 
     @task(trigger_rule='none_failed_min_one_success')
-    def structured_to_deltalake_task():
+    def structured_to_deltalake_task(**context):
         from src.deltalake.csv_deltalake_loader import CSVDeltalakeLoader
         from src.utils import get_logger
-        from src import minio_client, duckdb_client
+        from src.utils.time_anchor import logical_date_from_context
+        from src import get_minio_client, get_duckdb_client
+        minio_client = get_minio_client()
+        duckdb_client = get_duckdb_client()
+        logical_date = logical_date_from_context(context)
         logger = get_logger(__name__)
 
         logger.info("Starting structured data migration task.")
@@ -47,14 +51,18 @@ def write_deltalake_dag():
 
         loader = CSVDeltalakeLoader(minio_client, duckdb_client)
 
-        loader.load_and_transform("landing-zone", "persistent-landing/structured/raw/")
+        loader.load_and_transform("landing-zone", "persistent-landing/structured/raw/", logical_date=logical_date)
         logger.info("Structured data migration completed successfully.")
 
     @task(trigger_rule='none_failed_min_one_success')
-    def write_image_catalog_task(**kwargs):
+    def write_image_catalog_task(**context):
         from src.deltalake.catalog_builder import CatalogBuilder
         from src.utils import get_logger
-        from src import minio_client, duckdb_client
+        from src.utils.time_anchor import logical_date_from_context
+        from src import get_minio_client, get_duckdb_client
+        minio_client = get_minio_client()
+        duckdb_client = get_duckdb_client()
+        logical_date = logical_date_from_context(context)
         logger = get_logger(__name__)
         logger.info("Initializing CatalogBuilder for Image Sync.")
 
@@ -67,7 +75,7 @@ def write_deltalake_dag():
             logger.info(f"Target Delta Table: {target}")
 
             # Execution
-            builder.run_image_ingestion("landing-zone", "persistent-landing/unstructured/image/", target)
+            builder.run_image_ingestion("landing-zone", "persistent-landing/unstructured/image/", target, logical_date=logical_date)
 
             logger.info("Image catalog sync completed successfully.")
         except Exception as e:
