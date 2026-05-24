@@ -31,4 +31,7 @@ RUN python3.13 -m pip install --no-cache-dir \
 ENV PYSPARK_PYTHON=/usr/bin/python3.13
 ENV PYSPARK_DRIVER_PYTHON=/usr/bin/python3.13
 
+RUN curl -L -o /opt/spark/jars/postgresql.jar \
+    https://jdbc.postgresql.org/download/postgresql-42.7.3.jar
+
 USER spark
