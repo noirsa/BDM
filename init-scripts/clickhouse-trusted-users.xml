@@ -1,0 +1,29 @@
+<clickhouse>
+  <users>
+    <trusted_structured_writer>
+      <profile>default</profile>
+      <networks>
+        <ip>0.0.0.0/0</ip>
+        <ip>::/0</ip>
+      </networks>
+      <password><![CDATA[trusted_structured_writer_password]]></password>
+      <quota>default</quota>
+      <grants>
+        <query>GRANT SHOW TABLES, SELECT, INSERT, CREATE TABLE, DROP TABLE, ALTER ON bi_analytics.*</query>
+      </grants>
+    </trusted_structured_writer>
+
+    <trusted_structured_reader>
+      <profile>default</profile>
+      <networks>
+        <ip>0.0.0.0/0</ip>
+        <ip>::/0</ip>
+      </networks>
+      <password><![CDATA[trusted_structured_reader_password]]></password>
+      <quota>default</quota>
+      <grants>
+        <query>GRANT SHOW TABLES, SELECT ON bi_analytics.*</query>
+      </grants>
+    </trusted_structured_reader>
+  </users>
+</clickhouse>
