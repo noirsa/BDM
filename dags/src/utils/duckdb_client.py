@@ -1,17 +1,19 @@
 import duckdb
 from .logging_util import get_logger
-from .load_config import get_minio_config
+from .load_config import get_minio_config, get_minio_credentials
 
 logger = get_logger(__name__)
 
 class MinioDuckDB:
-    def __init__(self):
+    def __init__(self, role="admin"):
+        self.role = role
         minio_config = get_minio_config()['minio']
+        minio_credentials = get_minio_credentials(role)
         self.endpoint = minio_config["endpoint"]
-        self.access_key = minio_config["access_key"]
-        self.secret_key = minio_config["secret_key"]
+        self.access_key = minio_credentials["access_key"]
+        self.secret_key = minio_credentials["secret_key"]
 
-        logger.info(f"Initializing DuckDB with MinIO endpoint: {self.endpoint}")
+        logger.info(f"Initializing DuckDB with MinIO endpoint: {self.endpoint} and role '{self.role}'")
 
         self.con = duckdb.connect(database=':memory:')
 

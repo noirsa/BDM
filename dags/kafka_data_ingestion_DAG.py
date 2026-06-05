@@ -24,7 +24,7 @@ def ingest_kafka_dataset():
         from src import get_minio_client
         from src.utils import get_logger
 
-        minio_client = get_minio_client()
+        minio_client = get_minio_client(role="writer")
         logger = get_logger(context.get("task_id"))
 
         try:
@@ -49,7 +49,7 @@ def ingest_kafka_dataset():
         from src.utils import get_logger
         from src.utils.time_anchor import compact_date_partition, logical_date_from_context, logical_date_iso
         from src import get_minio_client
-        minio_client = get_minio_client()
+        minio_client = get_minio_client(role="writer")
         topic_name = config["name"]
         group_id = config["group_id"]
         logical_date = logical_date_from_context(context)

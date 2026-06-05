@@ -2,6 +2,16 @@ minio:
   endpoint: ${MINIO_ENDPOINT}
   access_key: ${MINIO_ACCESS_KEY}
   secret_key: ${MINIO_SECRET_KEY}
+  users:
+    admin:
+      access_key: ${MINIO_ACCESS_KEY}
+      secret_key: ${MINIO_SECRET_KEY}
+    writer:
+      access_key: ${MINIO_WRITER_ACCESS_KEY}
+      secret_key: ${MINIO_WRITER_SECRET_KEY}
+    reader:
+      access_key: ${MINIO_READER_ACCESS_KEY}
+      secret_key: ${MINIO_READER_SECRET_KEY}
   buckets:
     landing:
       name: "landing-zone"

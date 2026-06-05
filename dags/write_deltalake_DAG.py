@@ -41,8 +41,8 @@ def write_deltalake_dag():
         from src.utils import get_logger
         from src.utils.time_anchor import logical_date_from_context
         from src import get_minio_client, get_duckdb_client
-        minio_client = get_minio_client()
-        duckdb_client = get_duckdb_client()
+        minio_client = get_minio_client(role="writer")
+        duckdb_client = get_duckdb_client(role="writer")
         logical_date = logical_date_from_context(context)
         logger = get_logger(__name__)
 
@@ -60,8 +60,8 @@ def write_deltalake_dag():
         from src.utils import get_logger
         from src.utils.time_anchor import logical_date_from_context
         from src import get_minio_client, get_duckdb_client
-        minio_client = get_minio_client()
-        duckdb_client = get_duckdb_client()
+        minio_client = get_minio_client(role="writer")
+        duckdb_client = get_duckdb_client(role="writer")
         logical_date = logical_date_from_context(context)
         logger = get_logger(__name__)
         logger.info("Initializing CatalogBuilder for Image Sync.")

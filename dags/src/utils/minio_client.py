@@ -2,7 +2,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from .logging_util import get_logger
-from .load_config import get_minio_config
+from .load_config import get_minio_config, get_minio_credentials
 
 log = get_logger(__name__)
 
@@ -13,7 +13,7 @@ class MinioClient:
     Injected into DataLoaders to manage bucket lifecycle and file uploads.
     """
 
-    def __init__(self):
+    def __init__(self, role="admin"):
         """
         Initializes the Minio connection using the provided configuration.
 
@@ -22,15 +22,17 @@ class MinioClient:
         logger: Logger instance for tracking operations
         """
         self.logger = log
+        self.role = role
         self.minio_config = get_minio_config()['minio']
+        self.minio_credentials = get_minio_credentials(role)
         # Extract values from the centralized config
         self.client = (  boto3.client(
                 "s3",
                 endpoint_url=self.minio_config["endpoint"],  # MinIO API endpoint
-                aws_access_key_id=self.minio_config["access_key"], # User name
-                aws_secret_access_key=self.minio_config["secret_key"],  # Password
+                aws_access_key_id=self.minio_credentials["access_key"], # User name
+                aws_secret_access_key=self.minio_credentials["secret_key"],  # Password
             ))
-        self.logger.info("MinioClient service initialized within dataloader.")
+        self.logger.info("MinioClient service initialized with role '%s'.", self.role)
 
     def delete_object(self, bucket_name, object_key):
         self.client.delete_object(Bucket=bucket_name, Key=object_key)

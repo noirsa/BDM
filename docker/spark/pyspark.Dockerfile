@@ -8,6 +8,7 @@ RUN set -ex; \
     add-apt-repository ppa:deadsnakes/ppa; \
     apt-get update; \
     apt-get install -y \
+        python3.12 \
         python3.13 \
         python3.13-dev \
         python3.13-venv \
@@ -15,17 +16,19 @@ RUN set -ex; \
     rm -rf /var/lib/apt/lists/*
 
 # install pip explicitly (THIS IS THE FIX)
-RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.13
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12 \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.13
 
 # install python packages using correct interpreter
-RUN python3.13 -m pip install --no-cache-dir \
+RUN python3.12 -m pip install --no-cache-dir \
+    boto3 \
+    pillow \
+    clickhouse_connect \
+    && python3.13 -m pip install --no-cache-dir \
     boto3 \
     pillow \
     numpy \
     pandas \
-    torch \
-    transformers \
-    pymilvus \
     clickhouse_connect
 
 ENV PYSPARK_PYTHON=/usr/bin/python3.13

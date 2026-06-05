@@ -24,7 +24,7 @@ def daily_catalog_update():
     def check_catalog_integrity():
         """Ensure the Delta Lake catalog storage is accessible."""
         from src import get_minio_client
-        minio_client = get_minio_client()
+        minio_client = get_minio_client(role="writer")
         minio_client.client.head_bucket(Bucket="landing-zone")
         return True
     @task()
@@ -42,9 +42,9 @@ def daily_catalog_update():
         from deltalake import DeltaTable, write_deltalake
 
         import pandas as pd
-        minio_client = get_minio_client()
+        minio_client = get_minio_client(role="writer")
         kafka_config = load_kafka_config()
-        storage_options = get_storage_options()
+        storage_options = get_storage_options(role="writer")
         logical_date = logical_date_from_context(context)
         logger = get_logger(__name__)
         catalog_path = "s3://landing-zone/persistent-landing/structured/file_catalog/"

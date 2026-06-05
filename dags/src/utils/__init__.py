@@ -6,7 +6,7 @@ are set up in the correct sequence before any data processing tasks begin.
 
 from .env_utils import setup_environment
 from .logging_util import configure_logger, get_logger
-from .load_config import get_minio_config, get_config
+from .load_config import get_minio_config, get_minio_credentials, get_config
 from .helper import get_deep_keys
 from .time_anchor import compact_date_partition, date_partition, logical_date_from_context, logical_date_iso, logical_date_suffix
 # 1. Load environment variables first (No logging dependencies here)
@@ -36,11 +36,12 @@ def load_stream_config():
     return get_config("stream_ingestion_config.yaml", "ingestion_strategy")["ingestion_strategy"]
 
 
-def get_storage_options():
+def get_storage_options(role="admin"):
     minio_config = get_minio_config()['minio']
+    minio_credentials = get_minio_credentials(role)
     return {
-        "AWS_ACCESS_KEY_ID": minio_config["access_key"],
-        "AWS_SECRET_ACCESS_KEY": minio_config["secret_key"],
+        "AWS_ACCESS_KEY_ID": minio_credentials["access_key"],
+        "AWS_SECRET_ACCESS_KEY": minio_credentials["secret_key"],
         "AWS_ENDPOINT_URL": minio_config["endpoint"],
         "AWS_S3_ALLOW_UNSAFE_RENAME": "true",
         "AWS_S3_ADDRESSING_STYLE": "path",

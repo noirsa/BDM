@@ -22,6 +22,9 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_ISSUER: ${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow}
     # Kafka
     KAFKA_BOOTSTRAP_SERVERS: 'kafka:9092'
+    CLIP_MODEL_PATH: 'openai/clip-vit-base-patch32'
+    HF_HOME: '/opt/airflow/hf_cache'
+    IMAGE_EMBEDDING_DEVICE: 'auto'
     # yamllint disable rule:line-length
     # Use simple http server on scheduler for health checks
     # See https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html#scheduler-health-check-server
@@ -36,6 +39,7 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - airflow-logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+    - ${AIRFLOW_PROJ_DIR:-.}/huggingface:/opt/airflow/hf_cache
     - ./.env:/opt/.env
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
@@ -66,6 +70,20 @@ services:
       timeout: 5s
       retries: 10
 
+  minio-rbac:
+    image: minio/mc:latest
+    container_name: minio-rbac
+    env_file:
+      - ${ENV_FILE_PATH:-.env}
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./init-scripts/minio-rbac.sh:/init-scripts/minio-rbac.sh:ro
+      - ./config/minio_policies:/config/minio_policies:ro
+    entrypoint: ["/bin/sh", "/init-scripts/minio-rbac.sh"]
+    restart: on-failure
+
 
   postgres:
     image: postgres:16
@@ -75,7 +93,7 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d/
+      - ./init-scripts/01-init-databases.sql:/docker-entrypoint-initdb.d/01-init-databases.sql:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
@@ -418,6 +436,8 @@ services:
 
   jupyter:
     build: ./docker/jupyter/
+    env_file:
+      - ${ENV_FILE_PATH:-.env}
     ports:
       - "8888:8888"
       - "4040:4040"   # Spark application Web UI
@@ -428,6 +448,9 @@ services:
     restart: unless-stopped
     environment:
       JUPYTER_TOKEN: jupyter
+      CLIP_MODEL_PATH: openai/clip-vit-base-patch32
+      HF_HOME: /opt/spark/hf_cache
+      IMAGE_EMBEDDING_DEVICE: auto
     depends_on:
       - spark-master
 
@@ -441,7 +464,30 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: mongo
     volumes:
       - ./mongo_data:/data/db
+      - ./init-scripts/mongo-rbac.js:/docker-entrypoint-initdb.d/20-mongo-rbac.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "mongodb://mongo:mongo@localhost:27017/admin", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     restart: unless-stopped
+
+  mongo-rbac:
+    image: mongo:7
+    container_name: mongo-rbac
+    env_file:
+      - ${ENV_FILE_PATH:-.env}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./init-scripts/mongo-rbac.js:/docker-entrypoint-initdb.d/20-mongo-rbac.js:ro
+    entrypoint:
+      - mongosh
+      - mongodb://mongo:mongo@mongo:27017/admin
+      - /docker-entrypoint-initdb.d/20-mongo-rbac.js
+    restart: on-failure
 
   mongo-express:
     image: mongo-express:latest
@@ -454,7 +500,8 @@ services:
       ME_CONFIG_MONGODB_SERVER: mongo
       ME_CONFIG_BASICAUTH: "false"
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     restart: unless-stopped
 
  # ── Key-value store ───────────────────────────────────────────────────────────
@@ -567,8 +614,16 @@ services:
       - CLICKHOUSE_USER=analytics
       - CLICKHOUSE_PASSWORD=analytics_secret
       - CLICKHOUSE_DB=bi_analytics
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
     volumes:
       - clickhouse_data:/var/lib/clickhouse
+      - ./init-scripts/clickhouse-trusted-users.xml:/etc/clickhouse-server/users.d/trusted-users.xml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     ulimits:
       nofile:
         soft: 262144

@@ -12,7 +12,7 @@ def poke_minio_for_real_data(**context):
     from src.utils import get_logger
     from src import get_minio_client
 
-    minio_client = get_minio_client()
+    minio_client = get_minio_client(role="writer")
     conf = context.get('dag_run').conf or {}
     source = "Automated" if conf.get('trigger_source') == 'auto_ingest' else "Manual"
     logger = get_logger(context.get('task_id'))
@@ -84,7 +84,7 @@ def temporal_to_persistent_dag():
         from src.utils.time_anchor import logical_date_from_context
         from src import get_minio_client
 
-        minio_client = get_minio_client()
+        minio_client = get_minio_client(role="writer")
         logical_date = logical_date_from_context(context)
         logger = get_logger("move_data_task")
 

@@ -53,6 +53,34 @@ def get_minio_config():
     return config
 
 
+def get_minio_credentials(role: str = "admin"):
+    """
+    Return MinIO credentials for a named access role.
+
+    The top-level access_key/secret_key remains the admin default so notebooks
+    that use the old configuration continue to run unchanged. Airflow DAGs can
+    request the writer or reader role explicitly.
+    """
+    minio_config = get_minio_config()["minio"]
+    users = minio_config.get("users", {})
+
+    if role == "admin" and "admin" not in users:
+        return {
+            "access_key": minio_config["access_key"],
+            "secret_key": minio_config["secret_key"],
+        }
+
+    if role not in users:
+        known_roles = sorted(users) or ["admin"]
+        raise KeyError(f"Unknown MinIO role '{role}'. Available roles: {known_roles}")
+
+    credentials = users[role]
+    return {
+        "access_key": credentials["access_key"],
+        "secret_key": credentials["secret_key"],
+    }
+
+
 @lru_cache(maxsize=10)
 def get_config(file_name, key):
     """

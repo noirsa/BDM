@@ -27,7 +27,7 @@ def ingest_dataset_dag():
         from src import get_minio_client
         from src.utils import get_logger
 
-        minio_client = get_minio_client()
+        minio_client = get_minio_client(role="writer")
         logger = get_logger(context.get("task_id"))
 
         try:
@@ -48,7 +48,7 @@ def ingest_dataset_dag():
         from src.utils.time_anchor import logical_date_from_context
         from src.dataloader.kaggle_loader import KaggleLoader
         from src import get_minio_client
-        minio_client = get_minio_client()
+        minio_client = get_minio_client(role="writer")
         loader = KaggleLoader(minio_client)
         logger = get_logger(__name__)
         logical_date = logical_date_from_context(context)
@@ -92,7 +92,7 @@ def ingest_dataset_dag():
         from src.utils.time_anchor import logical_date_from_context
         from src.dataloader.huggingface_loader import HuggingfaceDataLoader
         from src import get_minio_client
-        minio_client = get_minio_client()
+        minio_client = get_minio_client(role="writer")
         loader = HuggingfaceDataLoader(minio_client)
         logger = get_logger(__name__)
         logical_date = logical_date_from_context(context)
