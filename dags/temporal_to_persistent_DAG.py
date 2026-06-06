@@ -10,20 +10,45 @@ from airflow.sensors.time_delta import TimeDeltaSensor
 
 def poke_minio_for_real_data(**context):
     from src.utils import get_logger
+    from src.utils.airflow_context import trigger_context
     from src import get_minio_client
 
     minio_client = get_minio_client(role="writer")
     conf = context.get('dag_run').conf or {}
     source = "Automated" if conf.get('trigger_source') == 'auto_ingest' else "Manual"
     logger = get_logger(context.get('task_id'))
+    run_context = trigger_context(context, "temporal_to_persistent")
 
     if minio_client.verify_empty_bucket("landing-zone", "temporal-landing/"):
         if source == "Automated":
             raise Exception("Expected data but found none.")
-        logger.info(f"[{source}] Checking temporal-landing... Bucket is still empty. skip...")
+        logger.info(
+            "[%s] No source assets found dag_id=%s task_id=%s run_id=%s logical_date=%s trigger_source=%s source_dag_id=%s source_run_id=%s source_assets=%s",
+            source,
+            run_context["dag_id"],
+            run_context["task_id"],
+            run_context["run_id"],
+            run_context["logical_date"],
+            run_context["trigger_source"],
+            run_context["source_dag_id"],
+            run_context["source_run_id"],
+            "landing-zone/temporal-landing/",
+        )
         raise AirflowSkipException("No files found in temporal-landing, skipping downstream tasks.")
 
-    logger.info(f"[{source}] Data detected in temporal-landing! Triggering move task now.")
+    logger.info(
+        "[%s] Data detected dag_id=%s task_id=%s run_id=%s logical_date=%s trigger_source=%s source_dag_id=%s source_run_id=%s source_assets=%s output_assets=%s",
+        source,
+        run_context["dag_id"],
+        run_context["task_id"],
+        run_context["run_id"],
+        run_context["logical_date"],
+        run_context["trigger_source"],
+        run_context["source_dag_id"],
+        run_context["source_run_id"],
+        "landing-zone/temporal-landing/",
+        "landing-zone/persistent-landing/",
+    )
     return True
 
 @dag(
@@ -36,7 +61,10 @@ def poke_minio_for_real_data(**context):
 )
 def temporal_to_persistent_dag():
     """
-    Main DAG definition for the Temporal to Persistent workflow.
+    Move temporal landing objects into persistent landing asset families.
+
+    The DAG remains manual-triggerable and also participates in the optional
+    end-to-end chain by triggering write_deltalake after a successful move.
     """
 
     @task.branch
@@ -81,14 +109,27 @@ def temporal_to_persistent_dag():
             structured/raw, unstructured/image, or semistructured directories.
         """
         from src.utils import get_logger
+        from src.utils.airflow_context import trigger_context
         from src.utils.time_anchor import logical_date_from_context
         from src import get_minio_client
 
         minio_client = get_minio_client(role="writer")
         logical_date = logical_date_from_context(context)
         logger = get_logger("move_data_task")
+        run_context = trigger_context(context, "temporal_to_persistent")
 
-        logger.info("Executing bucket migration and classification logic.")
+        logger.info(
+            "Executing bucket migration dag_id=%s task_id=%s run_id=%s logical_date=%s trigger_source=%s source_dag_id=%s source_run_id=%s source_assets=%s output_assets=%s",
+            run_context["dag_id"],
+            run_context["task_id"],
+            run_context["run_id"],
+            logical_date,
+            run_context["trigger_source"],
+            run_context["source_dag_id"],
+            run_context["source_run_id"],
+            "landing-zone/temporal-landing/",
+            "landing-zone/persistent-landing/{structured,semistructured,unstructured}/",
+        )
 
         minio_client.move_bucket(
             source_bucket='landing-zone',
@@ -100,12 +141,35 @@ def temporal_to_persistent_dag():
 
         return "move complete."
 
+    @task(trigger_rule='none_failed_min_one_success')
+    def log_trigger_deltalake_task(**context):
+        from src.utils import get_logger
+        from src.utils.airflow_context import trigger_context
+
+        logger = get_logger("dags.temporal_to_persistent")
+        run_context = trigger_context(context, "temporal_to_persistent")
+        logger.info(
+            "Triggering downstream DAG dag_id=%s task_id=%s run_id=%s logical_date=%s trigger_source=%s source_dag_id=%s source_run_id=%s output_assets=%s triggered_downstream_dag_id=%s",
+            run_context["dag_id"],
+            run_context["task_id"],
+            run_context["run_id"],
+            run_context["logical_date"],
+            run_context["trigger_source"],
+            run_context["source_dag_id"],
+            run_context["source_run_id"],
+            "landing-zone/persistent-landing/",
+            "write_deltalake",
+        )
+
     trigger_delta_write = TriggerDagRunOperator(
         task_id='trigger_deltalake_write',
         trigger_dag_id='write_deltalake',
         conf={
             "trigger_source": "temporal_to_persistent_flow",
+            "source_dag_id": "temporal_to_persistent",
+            "source_run_id": "{{ run_id }}",
             "source_logical_date": "{{ (dag_run.conf or {}).get('source_logical_date') or logical_date.isoformat() }}",
+            "pipeline_mode": "auto_chained",
         },
         wait_for_completion=False,
     )
@@ -118,7 +182,7 @@ def temporal_to_persistent_dag():
 
     move_task_instance = move_data_task()
 
-    wait_for_ingestion >> move_task_instance >> trigger_delta_write
+    wait_for_ingestion >> move_task_instance >> log_trigger_deltalake_task() >> trigger_delta_write
 
 
 # Instantiate the DAG

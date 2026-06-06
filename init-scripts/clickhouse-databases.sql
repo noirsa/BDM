@@ -1,0 +1,2 @@
+CREATE DATABASE IF NOT EXISTS bi_analytics;
+CREATE DATABASE IF NOT EXISTS exploitation_analytics;

@@ -5,7 +5,7 @@ from typing import Any
 from src.utils import get_storage_options
 
 from .base import BaseTrustedZoneService
-from .governance import ALLOWED_IMAGE_EXTENSIONS, governance_metadata
+from .governance import ALLOWED_IMAGE_EXTENSIONS, CATALOGUE_POLICY_FIELDS, catalogue_policy_metadata, governance_metadata
 from .quality_checks import TrustedQualityChecks
 
 
@@ -70,6 +70,74 @@ class UnstructuredTrustedCleaner(BaseTrustedZoneService):
         row_count = dataframe.count()
         dataframe.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(target_path)
         self.quality_checks.validate_write_result(target_path, row_count)
+
+    def log_image_processing_status_counts(self, results_df: Any) -> dict[str, int]:
+        """Log transformation outcomes before trusted catalogue materialisation."""
+        from pyspark.sql import functions as F
+
+        counts = {
+            row["status"]: int(row["count"])
+            for row in results_df.groupBy("status").agg(F.count("*").alias("count")).collect()
+        }
+        self.logger.info(
+            "Trusted unstructured processing status counts=%s source_assets=%s output_assets=%s",
+            counts,
+            ["s3a://landing-zone/persistent-landing/structured/file_catalog/"],
+            ["s3a://trusted-zone/unstructured/image/", "s3a://trusted-zone/file_catalog/"],
+        )
+        return counts
+
+    def validate_trusted_image_catalog(self, dataframe: Any, expected_success_count: int, status_counts: dict[str, int]) -> None:
+        """Validate that trusted image cleaning preserved valid assets and metadata evidence."""
+        from functools import reduce
+        from operator import or_
+
+        from pyspark.sql import functions as F
+
+        row_count = int(dataframe.count())
+        missing_critical_fields = [
+            "id",
+            "trusted_path",
+            "raw_source_path",
+            "source_file_path",
+            "source_system",
+            "ingestion_time",
+            "validation_status",
+            "schema_version",
+            *CATALOGUE_POLICY_FIELDS,
+        ]
+        missing_critical = dataframe.where(
+            reduce(
+                or_,
+                [F.col(field).isNull() | (F.trim(F.col(field).cast("string")) == "") for field in missing_critical_fields],
+            )
+        ).count()
+        invalid_standardisation = dataframe.where(
+            (F.col("current_width") != 512)
+            | (F.col("current_height") != 512)
+            | (F.col("current_image_mode") != "RGB")
+            | (F.col("current_format") != "PNG")
+            | (~F.col("trusted_path").startswith("s3a://trusted-zone/"))
+            | (F.col("validation_status") != "valid")
+        ).count()
+        missing_lineage_metrics = dataframe.where(F.col("file_size_bytes").isNull() | F.col("md5").isNull()).count()
+
+        validation_summary = {
+            "catalogue_rows": row_count,
+            "expected_success_rows": int(expected_success_count),
+            "missing_critical_fields": int(missing_critical),
+            "invalid_standardisation_rows": int(invalid_standardisation),
+            "missing_lineage_metrics": int(missing_lineage_metrics),
+            "status_counts": status_counts,
+        }
+        self.logger.info("Trusted unstructured validation summary=%s", validation_summary)
+
+        if row_count != expected_success_count:
+            raise ValueError(
+                f"Trusted image catalogue row count mismatch: expected {expected_success_count}, observed {row_count}"
+            )
+        if missing_critical or invalid_standardisation or missing_lineage_metrics:
+            raise ValueError(f"Trusted image catalogue validation failed: {validation_summary}")
 
     def rejected_image_metadata(self, image_records: Any, logical_date: Any) -> Any:
         """Build a rejected catalogue for invalid landing image metadata."""
@@ -220,6 +288,7 @@ class UnstructuredTrustedCleaner(BaseTrustedZoneService):
                 ]
             )
             all_results_df = spark_session.createDataFrame(processing_results, schema=result_schema)
+            status_counts = self.log_image_processing_status_counts(all_results_df)
             failed_results_df = all_results_df.filter(~F.col("status").isin("DIRECT_COPY", "PILLOW_TRANSFORMED")).join(
                 cleaned_image_df.select(F.col("file_id").alias("id"), F.col("file_path").alias("source_file_path")),
                 on="id",
@@ -256,16 +325,20 @@ class UnstructuredTrustedCleaner(BaseTrustedZoneService):
             execution_results_df = all_results_df.filter(
                 F.col("status").isin("DIRECT_COPY", "PILLOW_TRANSFORMED")
             )
+            success_count = execution_results_df.count()
             trusted_catalog_df = execution_results_df.join(
                 cleaned_image_df.select(
                     F.col("file_id").alias("id"),
                     F.col("file_path").alias("raw_source_path"),
                     F.col("meta.label").alias("label"),
                     F.col("meta.url").alias("source_url"),
+                    F.col("meta.file_size_bytes").alias("file_size_bytes"),
+                    F.col("meta.md5").alias("md5"),
                 ),
                 on="id",
                 how="inner",
             )
+            policy_metadata = catalogue_policy_metadata({"source_type": "unstructured", "validation_status": "valid"})
             trusted_catalog_df = (
                 trusted_catalog_df.withColumn("current_width", F.lit(512))
                 .withColumn("current_height", F.lit(512))
@@ -278,6 +351,9 @@ class UnstructuredTrustedCleaner(BaseTrustedZoneService):
                 .withColumn("validation_status", F.lit("valid"))
                 .withColumn("schema_version", F.lit("trusted_v1"))
             )
+            for field_name, field_value in policy_metadata.items():
+                trusted_catalog_df = trusted_catalog_df.withColumn(field_name, F.lit(field_value))
+            self.validate_trusted_image_catalog(trusted_catalog_df, success_count, status_counts)
             self.write_trusted_image_metadata(trusted_catalog_df, "s3a://trusted-zone/file_catalog/")
         finally:
             spark_session.stop()

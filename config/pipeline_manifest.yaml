@@ -1,0 +1,301 @@
+project_name: BDM climate and disaster analytics pipeline
+schema_version: "1.0"
+
+zones:
+  landing:
+    dag_ids:
+      - ingest_dataset
+      - ingest_kafka_dataset
+      - temporal_to_persistent
+      - write_deltalake
+      - daily_kafka_data_catalog_update
+    notebook_paths:
+      - notebooks/Landing Zone/1. landing_zone.ipynb
+      - notebooks/Landing Zone/2. temporal_landing.ipynb
+      - notebooks/Landing Zone/3. persistent_landing.ipynb
+      - notebooks/Landing Zone/4. persistent_landing_delta_lake.ipynb
+      - notebooks/Landing Zone/5. data_ingestion_streaming.ipynb
+      - notebooks/Landing Zone/6. persistent_landing_delta_lake_nonstructured.ipynb
+    source_systems:
+      - Kaggle
+      - Hugging Face
+      - Kafka
+    target_systems:
+      - MinIO landing-zone
+      - Delta Lake on MinIO
+    output_assets:
+      - landing-zone/temporal-landing/
+      - landing-zone/persistent-landing/structured/raw/
+      - landing-zone/persistent-landing/semistructured/<topic>/<yyyymmdd>/
+      - landing-zone/persistent-landing/unstructured/image/
+      - landing-zone/persistent-landing/structured/file_catalog/
+    asset_types:
+      - raw_csv
+      - raw_json
+      - raw_image
+      - delta_table
+      - file_catalogue
+    metadata_fields:
+      - source_file_path
+      - ingestion_time
+      - logical_date
+      - source_system
+      - table_name
+      - content_type
+      - validation_status
+      - schema_version
+      - owner
+      - data_steward
+      - data_classification
+      - pii_flag
+      - retention_policy
+    rbac_roles_used:
+      - minio_landing_writer
+      - minio_landing_reader
+
+  trusted:
+    dag_ids:
+      - trusted_zone
+      - trusted_zone_semistructured_daily
+    notebook_paths:
+      - notebooks/Trusted Zone/2. structured_data_cleaning.ipynb
+      - notebooks/Trusted Zone/3. semi-structured_data_cleaning.ipynb
+      - notebooks/Trusted Zone/4. unstructured_data_cleaning.ipynb
+    source_systems:
+      - Delta Lake on MinIO
+      - MinIO image catalogue
+      - Kafka landing partitions
+    target_systems:
+      - ClickHouse bi_analytics
+      - MongoDB trusted_zone_semi-structured
+      - MinIO trusted-zone
+    output_assets:
+      - bi_analytics.global_warming_dataset
+      - bi_analytics.temperature_change
+      - bi_analytics.co2_emission_by_vehicles
+      - bi_analytics.natural_disaster_tweets
+      - trusted_zone_semi-structured.airquality_barcelona
+      - trusted_zone_semi-structured.weather_barcelona
+      - trusted-zone/unstructured/image/
+      - trusted-zone/file_catalog/
+      - trusted-zone/catalogue/
+      - trusted-zone/rejected/
+    asset_types:
+      - trusted_clickhouse_table
+      - trusted_mongodb_collection
+      - trusted_image_object
+      - trusted_catalogue
+      - rejected_quarantine_evidence
+    metadata_fields:
+      - source_file_path
+      - source_location
+      - schema_version
+      - validation_status
+      - ingestion_time
+      - owner
+      - data_steward
+      - data_classification
+      - pii_flag
+      - rbac_role
+    rbac_roles_used:
+      - clickhouse_trusted_writer
+      - clickhouse_trusted_reader
+      - mongodb_trusted_writer
+      - mongodb_trusted_reader
+      - minio_trusted_writer
+      - minio_trusted_reader
+
+  exploitation:
+    dag_ids:
+      - exploitation_zone_structured
+      - exploitation_zone_semistructured
+      - exploitation_zone_image_vectorization
+    notebook_paths:
+      - notebooks/Exploitation Zone/2. structured_data_exploitation.ipynb
+      - notebooks/Exploitation Zone/3. semi-structured_data_exploitation.ipynb
+      - notebooks/Exploitation Zone/4. unstructured_data_vectorization.ipynb
+    source_systems:
+      - ClickHouse bi_analytics
+      - MongoDB trusted_zone_semi-structured
+      - MinIO trusted-zone file catalogue
+    target_systems:
+      - ClickHouse exploitation_analytics
+      - MongoDB exploitation_zone_semi_structured
+      - Milvus image_vector_catalog
+      - MinIO exploitation-zone
+    output_assets:
+      - exploitation_analytics.dim_year
+      - exploitation_analytics.dim_country
+      - exploitation_analytics.dim_area
+      - exploitation_analytics.dim_time_period
+      - exploitation_analytics.dim_disaster_type
+      - exploitation_analytics.dim_vehicle
+      - exploitation_analytics.fact_climate_country_year
+      - exploitation_analytics.fact_temperature_area_period
+      - exploitation_analytics.fact_vehicle_emission
+      - exploitation_analytics.fact_tweet_features
+      - exploitation_analytics.bridge_tweet_hashtag
+      - exploitation_analytics.bridge_tweet_emoji
+      - exploitation_analytics.mart_climate_country_year
+      - exploitation_analytics.mart_temperature_trends
+      - exploitation_analytics.mart_vehicle_emission_summary
+      - exploitation_analytics.mart_disaster_tweet_features
+      - exploitation_analytics.mart_disaster_type_profile
+      - exploitation_zone_semi_structured.dim_station
+      - exploitation_zone_semi_structured.dim_sensor
+      - exploitation_zone_semi_structured.dim_weather_code
+      - exploitation_zone_semi_structured.fact_weather_observation
+      - exploitation_zone_semi_structured.fact_station_availability
+      - exploitation_zone_semi_structured.mart_weather_timeseries
+      - exploitation_zone_semi_structured.mart_weather_summary
+      - exploitation_zone_semi_structured.mart_environment_barcelona_overview
+      - milvus.image_vector_catalog
+      - s3a://exploitation-zone/image-vectorization/status/
+      - s3a://exploitation-zone/catalogue/image_vectorization/
+    asset_types:
+      - dimension_table
+      - fact_table
+      - bridge_table
+      - analytical_mart
+      - vector_collection
+      - exploitation_catalogue
+      - quality_summary
+      - lineage_record
+    metadata_fields:
+      - source_system
+      - source_assets
+      - downstream_usage
+      - owner
+      - schema_version
+      - quality_status
+      - record_count
+      - created_at
+      - embedding_model
+      - vector_dimension
+    rbac_roles_used:
+      - clickhouse_exploitation_writer
+      - clickhouse_exploitation_reader
+      - mongodb_exploitation_writer
+      - mongodb_exploitation_reader
+      - milvus_writer
+      - milvus_reader
+      - minio_exploitation_writer
+      - minio_exploitation_reader
+
+  consumption:
+    dag_ids:
+      - consumption_zone_tweet_classifier
+      - consumption_zone_streaming_dashboard_trigger
+    notebook_paths:
+      - notebooks/Consumption Zone/1. natural_disaster_tweet_classifier.ipynb
+      - notebooks/Consumption Zone/2. spark_streaming_with_kafka_dash.ipynb
+      - scripts/consumption_streaming_dashboard.py
+    source_systems:
+      - ClickHouse exploitation_analytics
+      - Kafka
+      - Spark Structured Streaming
+    target_systems:
+      - ClickHouse exploitation_analytics
+      - PostgreSQL dashboard sink
+      - notebook report output
+    output_assets:
+      - exploitation_analytics.model_tweet_classifier_metrics
+      - exploitation_analytics.streaming_dashboard_launch_log
+      - PostgreSQL.weather_events
+    asset_types:
+      - model_metrics_table
+      - dashboard_launch_log
+      - streaming_dashboard_table
+      - notebook_evidence
+    metadata_fields:
+      - source_assets
+      - model_name
+      - accuracy
+      - precision
+      - recall
+      - f1_score
+      - created_at
+      - validation_status
+      - check_message
+    rbac_roles_used:
+      - clickhouse_consumption_writer
+      - clickhouse_consumption_reader
+      - kafka_reader
+      - postgres_dashboard_writer
+
+orchestration:
+  manual_trigger_supported: true
+  trigger_chain:
+    - from: ingest_dataset
+      to: temporal_to_persistent
+      mode: sequential
+    - from: temporal_to_persistent
+      to: write_deltalake
+      mode: sequential
+    - from: write_deltalake
+      to: trusted_zone
+      mode: sequential
+    - from: trusted_zone
+      to:
+        - exploitation_zone_structured
+        - exploitation_zone_semistructured
+        - exploitation_zone_image_vectorization
+      mode: parallel
+    - from: exploitation_zone_structured
+      to: consumption_zone_tweet_classifier
+      mode: sequential
+    - from: exploitation_zone_semistructured
+      to: consumption_zone_streaming_dashboard_trigger
+      mode: sequential
+  parallel_groups:
+    - name: exploitation_fanout
+      upstream_dag_id: trusted_zone
+      dag_ids:
+        - exploitation_zone_structured
+        - exploitation_zone_semistructured
+        - exploitation_zone_image_vectorization
+  trigger_conf_fields:
+    - trigger_source
+    - source_dag_id
+    - source_run_id
+    - source_logical_date
+    - pipeline_mode
+
+governance:
+  catalogue_fields:
+    - asset_name
+    - domain
+    - asset_type
+    - storage_system
+    - location
+    - source_system
+    - source_assets
+    - downstream_usage
+    - owner
+    - data_steward
+    - data_classification
+    - pii_flag
+    - rbac_role
+    - quality_status
+    - record_count
+    - schema_version
+  lineage_fields:
+    - upstream_assets
+    - downstream_asset
+    - transformation_name
+    - transformation_type
+    - source_dag_id
+    - source_run_id
+    - source_logical_date
+    - created_at
+  rejected_or_quarantine_outputs:
+    - trusted-zone/rejected/
+    - trusted-zone/rejected/structured/
+    - trusted-zone/rejected/unstructured/image/
+    - trusted_zone_semi-structured.airquality_barcelona_rejected
+    - trusted_zone_semi-structured.weather_barcelona_rejected
+  rbac_summary:
+    landing: MinIO landing writer/reader roles separate ingestion writes from downstream reads.
+    trusted: ClickHouse, MongoDB, and MinIO trusted roles separate cleaning writes from exploitation reads.
+    exploitation: ClickHouse, MongoDB, Milvus, and MinIO exploitation roles separate analytical writes from consumption reads.
+    consumption: Consumption service roles write model/dashboard evidence without exposing upstream maintenance credentials.

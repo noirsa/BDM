@@ -7,7 +7,7 @@ from src.utils import get_storage_options
 
 from .base import BaseTrustedZoneService
 from .clickhouse_writer import ClickHouseTrustedWriter
-from .governance import GOVERNANCE_METADATA_FIELDS, governance_metadata, is_allowed_image_key
+from .governance import CATALOGUE_POLICY_FIELDS, GOVERNANCE_METADATA_FIELDS, catalogue_policy_metadata, governance_metadata, is_allowed_image_key
 from .quality_checks import TrustedQualityChecks
 
 
@@ -187,6 +187,8 @@ class TrustedCatalogueBuilder(BaseTrustedZoneService):
             )
             for field_name, field_value in metadata.items():
                 record.setdefault(field_name, field_value)
+            for field_name, field_value in catalogue_policy_metadata(record).items():
+                record.setdefault(field_name, field_value)
         return records
 
     def write_catalogue(self, catalogue_dataframe: Any, target_path: str) -> None:
@@ -241,6 +243,7 @@ class TrustedCatalogueBuilder(BaseTrustedZoneService):
             "metadata_blob",
             "processed_at",
             *GOVERNANCE_METADATA_FIELDS,
+            *CATALOGUE_POLICY_FIELDS,
         ]
         records: list[dict[str, Any]] = []
         paginator = self.s3_client.get_paginator("list_objects_v2")
@@ -281,6 +284,13 @@ class TrustedCatalogueBuilder(BaseTrustedZoneService):
                 filename = os.path.basename(src_key)
                 name, _ = os.path.splitext(filename)
                 source_path = f"s3://trusted-zone/{src_key}"
+                policy_metadata = catalogue_policy_metadata(
+                    {
+                        "dataset_name": "image",
+                        "source_type": metadata.get("source", "unstructured"),
+                        "validation_status": "valid",
+                    }
+                )
                 records.append(
                     {
                         "file_id": filename,
@@ -297,6 +307,7 @@ class TrustedCatalogueBuilder(BaseTrustedZoneService):
                             source_file_path=source_path,
                             validation_status="valid",
                         ),
+                        **policy_metadata,
                     }
                 )
         if not records:
@@ -313,6 +324,11 @@ class TrustedCatalogueBuilder(BaseTrustedZoneService):
                 "source_type": "unknown",
                 "file_type": "Image",
                 "metadata_blob": "{}",
+                "owner": "data_engineering_team",
+                "data_steward": "bdm_project_team",
+                "data_classification": "public_image_metadata",
+                "pii_flag": "no_direct_pii",
+                "retention_policy": "course_project_retained_until_assessment_archive",
             }
         )
         write_deltalake(

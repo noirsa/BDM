@@ -22,6 +22,17 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_ISSUER: ${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow}
     # Kafka
     KAFKA_BOOTSTRAP_SERVERS: 'kafka:9092'
+    SPARK_MASTER_URL: 'spark://spark-master:7077'
+    SPARK_MASTER_UI_URL: 'http://spark-master:8080/json/'
+    CONSUMPTION_DASHBOARD_NOTEBOOK_PATH: '/opt/airflow/notebooks/Consumption Zone/2. spark_streaming_with_kafka_dash.ipynb'
+    CONSUMPTION_DASHBOARD_SCRIPT_PATH: '/opt/airflow/scripts/consumption_streaming_dashboard.py'
+    CONSUMPTION_DASHBOARD_CHECKPOINT_LOCATION: '/opt/airflow/logs/checkpoints/consumption_streaming_dashboard/weather'
+    CONSUMPTION_DASHBOARD_LOG_PATH: '/opt/airflow/logs/consumption_streaming_dashboard.log'
+    DASHBOARD_SPARK_APP_NAME: 'consumption_streaming_dashboard'
+    DASHBOARD_POSTGRES_JDBC_URL: 'jdbc:postgresql://postgres-analytics:5432/analytics'
+    DASHBOARD_POSTGRES_TABLE: 'weather_events'
+    DASHBOARD_POSTGRES_USER: 'superset'
+    DASHBOARD_POSTGRES_PASSWORD: 'superset'
     CLIP_MODEL_PATH: 'openai/clip-vit-base-patch32'
     HF_HOME: '/opt/airflow/hf_cache'
     IMAGE_EMBEDDING_DEVICE: 'auto'
@@ -37,6 +48,8 @@ x-airflow-common:
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
+    - ${AIRFLOW_PROJ_DIR:-.}/notebooks:/opt/airflow/notebooks:ro
+    - ${AIRFLOW_PROJ_DIR:-.}/scripts:/opt/airflow/scripts:ro
     - airflow-logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/huggingface:/opt/airflow/hf_cache
@@ -414,7 +427,7 @@ services:
       SPARK_MASTER_OPTS: "-Dspark.deploy.defaultCores=4"
     ports:
       - "7077:7077"   # Spark master
-      - "8082:8082"   # Spark master Web UI
+      - "8082:8080"   # Spark master Web UI
     volumes:
       - ./huggingface:/opt/spark/hf_cache
 
@@ -542,8 +555,9 @@ services:
       MINIO_ADDRESS: "minio:9000"
       MINIO_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
-
       MINIO_USE_SSL: "false"
+      common.security.authorizationEnabled: "true"
+      COMMON_SECURITY_AUTHORIZATION_ENABLED: "true"
     volumes:
       - milvus_data:/var/lib/milvus
     healthcheck:
@@ -561,6 +575,28 @@ services:
       - "19530:19530"
       - "9091:9091"
 
+  milvus-rbac:
+    build: ./docker/airflow
+    container_name: milvus-rbac
+    env_file:
+      - ${ENV_FILE_PATH:-.env}
+    environment:
+      MILVUS_URI: http://milvus:19530
+      MILVUS_ROOT_USER: ${MILVUS_ROOT_USER:-root}
+      MILVUS_ROOT_PASSWORD: ${MILVUS_ROOT_PASSWORD:-Milvus}
+      MILVUS_WRITER_USER: ${MILVUS_WRITER_USER:-bdm_vector_writer}
+      MILVUS_WRITER_PASSWORD: ${MILVUS_WRITER_PASSWORD:-bdm_vector_writer_password}
+      MILVUS_READER_USER: ${MILVUS_READER_USER:-bdm_vector_reader}
+      MILVUS_READER_PASSWORD: ${MILVUS_READER_PASSWORD:-bdm_vector_reader_password}
+      MILVUS_IMAGE_COLLECTION: ${MILVUS_IMAGE_COLLECTION:-image_vector_catalog}
+    depends_on:
+      milvus:
+        condition: service_healthy
+    volumes:
+      - ./init-scripts/milvus-rbac.py:/opt/airflow/init-scripts/milvus-rbac.py:ro
+    entrypoint: ["python", "/opt/airflow/init-scripts/milvus-rbac.py"]
+    restart: on-failure
+
   # ── Attu vector search UI ─────────────────────────────────────────────────────
   # Having an UI is always nice. Not necessary, just nice :)
   attu:
@@ -569,10 +605,15 @@ services:
       - "3000:3000"
     environment:
       - MILVUS_ADDRESS=milvus:19530
+      - MILVUS_USERNAME=${MILVUS_READER_USER:-bdm_vector_reader}
+      - MILVUS_PASSWORD=${MILVUS_READER_PASSWORD:-bdm_vector_reader_password}
     volumes:
       - attu_data:/data
     depends_on:
-      - milvus
+      milvus:
+        condition: service_healthy
+      milvus-rbac:
+        condition: service_completed_successfully
 
 
   postgres-analytics:
@@ -586,6 +627,14 @@ services:
       - "5433:5432"
     volumes:
       - postgres-analytics:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset -d analytics"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
   superset:
     build: ./docker/superset/
     container_name: superset
@@ -593,16 +642,22 @@ services:
       - "8088:8088"
     environment:
       SUPERSET_SECRET_KEY: "your_secret_key"
+      # Superset metadata DB. This is persisted by the postgres-analytics volume below.
       SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://superset:superset@postgres-analytics:5432/analytics
     depends_on:
-      - postgres-analytics
+      postgres-analytics:
+        condition: service_healthy
+    volumes:
+      - superset_home:/app/superset_home
     command: >
       /bin/bash -c "
       superset db upgrade &&
-      superset fab create-admin --username superset --firstname Superset --lastname Admin --email admin@superset.com --password superset &&
+      superset fab create-admin --username superset --firstname Superset --lastname Admin --email admin@superset.com --password superset || true &&
       superset init &&
+      superset set-database-uri -d analytics_postgres -u postgresql+psycopg2://superset:superset@postgres-analytics:5432/analytics &&
       superset run -h 0.0.0.0 -p 8088
       "
+    restart: unless-stopped
 
   clickhouse:
     image: clickhouse/clickhouse-server:26.2-alpine
@@ -617,9 +672,10 @@ services:
       - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
     volumes:
       - clickhouse_data:/var/lib/clickhouse
+      - ./init-scripts/clickhouse-databases.sql:/docker-entrypoint-initdb.d/01-clickhouse-databases.sql:ro
       - ./init-scripts/clickhouse-trusted-users.xml:/etc/clickhouse-server/users.d/trusted-users.xml:ro
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8123/ping"]
+      test: ["CMD-SHELL", "clickhouse-client --user \"$${CLICKHOUSE_USER}\" --password \"$${CLICKHOUSE_PASSWORD}\" --query 'SELECT 1' >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -641,3 +697,4 @@ volumes:
   etcd_data:
   huggingface:
   postgres-analytics:
+  superset_home:

@@ -12,6 +12,14 @@ import json
 import pandas as pd
 
 
+LANDING_POLICY_FIELDS = {
+    "owner": "data_engineering_team",
+    "data_steward": "bdm_project_team",
+    "pii_flag": "no_direct_pii",
+    "retention_policy": "course_project_retained_until_assessment_archive",
+}
+
+
 def _extract_timestamp_from_filename(filename, fallback_logical_date):
     # Strip extension and split by underscore
     name_part = os.path.splitext(filename)[0]
@@ -78,7 +86,17 @@ class CatalogBuilder(BaseDeltalakeLoader):
                             "event_time": _extract_timestamp_from_filename(filename, logical_date),
                             "record_count": 1,
                             "metadata_blob": json.dumps(metadata_blob),
-                            "processed_at": pd.Timestamp(coerce_logical_date(logical_date))
+                            "processed_at": pd.Timestamp(coerce_logical_date(logical_date)),
+                            "source_system": s3_metadata.get("source_system") or s3_metadata.get("source") or "landing-zone",
+                            "ingestion_time": s3_metadata.get("ingestion_time") or coerce_logical_date(logical_date).isoformat(),
+                            "source_file_path": s3_metadata.get("source_file_path") or f"s3://{bucket}/{key}",
+                            "validation_status": s3_metadata.get("validation_status", "valid"),
+                            "schema_version": s3_metadata.get("schema_version", "landing_file_catalog_v1"),
+                            "owner": s3_metadata.get("owner", LANDING_POLICY_FIELDS["owner"]),
+                            "data_steward": s3_metadata.get("data_steward", LANDING_POLICY_FIELDS["data_steward"]),
+                            "data_classification": s3_metadata.get("data_classification", "public_image_metadata"),
+                            "pii_flag": s3_metadata.get("pii_flag", LANDING_POLICY_FIELDS["pii_flag"]),
+                            "retention_policy": s3_metadata.get("retention_policy", LANDING_POLICY_FIELDS["retention_policy"]),
                         }
                         page_records.append(record)
                         self.logger.debug(f"Processed image: {filename}")

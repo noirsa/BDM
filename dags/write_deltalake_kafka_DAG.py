@@ -117,7 +117,17 @@ def daily_catalog_update():
                                 "event_time": event_time,
                                 "record_count": record_count,
                                 "metadata_blob": json.dumps(metadata_blob),
-                                "processed_at": pd.Timestamp(logical_date)
+                                "processed_at": pd.Timestamp(logical_date),
+                                "source_system": "kafka",
+                                "ingestion_time": logical_date.isoformat(),
+                                "source_file_path": f"kafka://{name}/{filename}",
+                                "validation_status": "valid",
+                                "schema_version": "landing_file_catalog_v1",
+                                "owner": "data_engineering_team",
+                                "data_steward": "bdm_project_team",
+                                "data_classification": "public_environmental_observation",
+                                "pii_flag": "no_direct_pii",
+                                "retention_policy": "course_project_retained_until_assessment_archive",
                             })
 
                         except Exception as file_err:

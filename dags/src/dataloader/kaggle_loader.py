@@ -97,6 +97,16 @@ class KaggleLoader(BaseDataLoader):
                 "logical_date": logical_date_iso(logical_date),
                 "expected_rows": str(expected_rows or ""),
                 "expected_columns": str(expected_columns or ""),
+                "source_system": "kaggle",
+                "ingestion_time": logical_date_iso(logical_date),
+                "source_file_path": f"kaggle://{handle}/{file_name}",
+                "validation_status": "valid",
+                "schema_version": "landing_raw_v1",
+                "owner": "data_engineering_team",
+                "data_steward": "bdm_project_team",
+                "data_classification": "public_environmental_analytics",
+                "pii_flag": "no_direct_pii",
+                "retention_policy": "course_project_retained_until_assessment_archive",
             }
 
             self.logger.info(f"Successfully loaded {file_name} into DataFrame.")
@@ -158,6 +168,16 @@ class KaggleLoader(BaseDataLoader):
                                          "label": category,
                                          "dataset_name": name,
                                          "logical_date": logical_date_iso(logical_date),
+                                         "source_system": "kaggle",
+                                         "ingestion_time": logical_date_iso(logical_date),
+                                         "source_file_path": f"kaggle://{handle}/{category}/{file_name}",
+                                         "validation_status": "valid",
+                                         "schema_version": "landing_raw_v1",
+                                         "owner": "data_engineering_team",
+                                         "data_steward": "bdm_project_team",
+                                         "data_classification": "public_image",
+                                         "pii_flag": "no_direct_pii",
+                                         "retention_policy": "course_project_retained_until_assessment_archive",
                                      })
 
             self.logger.debug(f"Successfully ingested {category} of {name} into MinIO.")

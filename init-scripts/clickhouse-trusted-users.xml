@@ -25,5 +25,21 @@
         <query>GRANT SHOW TABLES, SELECT ON bi_analytics.*</query>
       </grants>
     </trusted_structured_reader>
+
+    <consumption_service>
+      <profile>default</profile>
+      <networks>
+        <ip>0.0.0.0/0</ip>
+        <ip>::/0</ip>
+      </networks>
+      <password><![CDATA[consumption_service_password]]></password>
+      <quota>default</quota>
+      <grants>
+        <query>GRANT SHOW TABLES ON exploitation_analytics.*</query>
+        <query>GRANT SELECT ON exploitation_analytics.fact_tweet_features</query>
+        <query>GRANT SELECT, INSERT, CREATE TABLE ON exploitation_analytics.model_tweet_classifier_metrics</query>
+        <query>GRANT SELECT, INSERT, CREATE TABLE, ALTER ON exploitation_analytics.streaming_dashboard_launch_log</query>
+      </grants>
+    </consumption_service>
   </users>
 </clickhouse>

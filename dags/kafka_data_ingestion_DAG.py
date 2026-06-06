@@ -102,6 +102,16 @@ def ingest_kafka_dataset():
                 "group_id": group_id,
                 "logical_date": logical_date_iso(logical_date),
                 "offset_ranges": json.dumps(offset_ranges, sort_keys=True),
+                "source_system": "kafka",
+                "ingestion_time": logical_date_iso(logical_date),
+                "source_file_path": f"kafka://{topic_name}/{partition_label}/{offset_fingerprint}",
+                "validation_status": "valid",
+                "schema_version": "landing_raw_v1",
+                "owner": "data_engineering_team",
+                "data_steward": "bdm_project_team",
+                "data_classification": "public_environmental_observation",
+                "pii_flag": "no_direct_pii",
+                "retention_policy": "course_project_retained_until_assessment_archive",
             },
         )
 
@@ -120,7 +130,10 @@ def ingest_kafka_dataset():
             trigger_dag_id="daily_kafka_data_catalog_update",
             conf={
                 "trigger_source": "kafka_ingest",
+                "source_dag_id": "ingest_kafka_dataset",
+                "source_run_id": "{{ run_id }}",
                 "source_logical_date": "{{ logical_date.isoformat() }}",
+                "pipeline_mode": "auto_chained",
             },
             wait_for_completion=False,
         )

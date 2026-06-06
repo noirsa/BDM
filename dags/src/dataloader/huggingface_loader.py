@@ -84,6 +84,16 @@ class HuggingfaceDataLoader(BaseDataLoader):
                 "logical_date": logical_date_iso(logical_date),
                 "expected_rows": str(expected_rows or ""),
                 "expected_columns": str(expected_columns or ""),
+                "source_system": "huggingface",
+                "ingestion_time": logical_date_iso(logical_date),
+                "source_file_path": f"huggingface://{path}/{split}",
+                "validation_status": "valid",
+                "schema_version": "landing_raw_v1",
+                "owner": "data_engineering_team",
+                "data_steward": "bdm_project_team",
+                "data_classification": "public_text_analytics",
+                "pii_flag": "possible_user_mentions",
+                "retention_policy": "course_project_retained_until_assessment_archive",
             }
 
             self.logger.info(f"Successfully loaded {path} into DataFrame.")

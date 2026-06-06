@@ -1,101 +1,288 @@
-# BDM (Big Data Management)
+# BDM Climate and Disaster Analytics Pipeline
 
-This repository is part of the first phase of the **BDM 25-26** project, focused on designing a **big data processing pipeline** before implementation. The goal is to define a high-level architecture showing how **structured, semi-structured, and unstructured data** flows from ingestion (e.g., CSV files, JSON APIs, images) into a landing zone (MinIO/S3), through processing and transformation stages (using Spark and Delta Lake), and finally to exploitation or consumption stages for analysis or downstream applications. The project contextualizes the problem in the **climate and environmental domain**, aiming to provide insights from historical and live datasets while demonstrating robust data management. Although some components, like Trusted and Exploitation Zones, are currently black boxes, the design lays a solid blueprint for future development, including handling large datasets, metadata management, and potential integration with machine learning workflows.
+This project implements a Big Data Management pipeline for climate, environmental, disaster-tweet, streaming, and image data. It demonstrates the full path from raw ingestion to curated trusted data, exploitation marts/vector search, and consumption outputs.
+
+The pipeline can be run in two ways:
+
+- **Airflow DAGs**: recommended for the final end-to-end demo.
+- **Jupyter notebooks**: recommended for step-by-step report evidence and classroom inspection.
+
+The notebooks and DAGs are intentionally mirrored, but notebooks do not import DAG helper functions.
 
 ---
 
-### Start Docker Containers
+## 1. Prerequisites
 
-Use the following command to deploy MinIO, ..., containers.
+Install:
 
-```bash
+- Docker Desktop
+- Docker Compose
+- Git
+
+Create the local environment file:
+
+```powershell
+copy .env.example .env
+```
+
+The default `.env.example` values are designed for the Docker Compose network. Do not commit real passwords or access keys.
+
+---
+
+## 2. Start The Stack
+
+### Full Stack
+
+```powershell
 docker compose up --build -d
 ```
 
-### GPU-enabled Notebook / Airflow Worker
+Useful local URLs:
 
-The default `docker-compose.yml` can run on machines without an NVIDIA GPU. For
-image embedding in the Exploitation Zone, use the GPU override file so Jupyter
-and the Airflow worker can access CUDA:
+| Service | URL | Notes |
+|---|---|---|
+| Jupyter | http://localhost:8888 | token: `jupyter` |
+| Airflow | http://localhost:8080 | user/password: `airflow` / `airflow` |
+| MinIO Console | http://localhost:9001 | credentials from `.env` |
+| Spark Master UI | http://localhost:8082 | worker/application status |
+| Kafka UI | http://localhost:8081 | topics and messages |
+| Mongo Express | http://localhost:8083 | MongoDB inspection |
+| Attu | http://localhost:3000 | Milvus vector DB inspection |
+| Superset | http://localhost:8088 | dashboard service |
 
-```bash
+### Spark Workers For Parallel Exploitation
+
+For parallel structured, semi-structured, and image/vector exploitation, run three Spark workers:
+
+```powershell
+docker compose up -d --force-recreate --scale spark-worker=3 spark-master spark-worker
+```
+
+Then open http://localhost:8082 and confirm three workers are registered.
+
+### GPU Optional
+
+The default stack can run without a GPU. For GPU image vectorization:
+
+```powershell
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml build jupyter airflow-worker
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --force-recreate jupyter airflow-worker
 ```
 
-Verify that the running Jupyter container can see the GPU:
+Verify:
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml exec jupyter python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NO GPU')"
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml exec jupyter python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NO GPU')"
 ```
 
-Expected GPU result: `torch.cuda.is_available()` prints `True`.
-
-If it prints `False`, the Exploitation image vectorization pipeline will still
-fall back to CPU. Rebuild and recreate the containers after changing
-`docker/jupyter/requirements.txt` or `docker/airflow/requirements.txt`; an
-already-running container will not pick up new PyTorch packages or GPU access.
-
-### Read Weather-Barcelona
-
-```bash
-docker exec -it bdm-kafka-1 kafka-console-consumer --bootstrap-server kafka:9092 --topic weather-barcelona --from-beginning
-```
-
-### Read Airquality-Barcelona
-
-```bash
-docker exec -it bdm-kafka-1 kafka-console-consumer --bootstrap-server kafka:9092 --topic airquality-barcelona --from-beginning
-```
-
-### Airflow workflow
-
-* **Credentials**
-  - **Username**: `airflow`
-  - **Password**: `airflow`
-* **infra_daily_integrity_check**: Runs automatically every day. However, it can be **manually triggered** in the event of a failure.
-* **Ingestion Pipeline**: 
-    1.  `ingest_dataset` must be triggered manually.
-    2.  Once complete, it automatically triggers `temporal_to_persistent`.
-    3.  Finally, `temporal_to_persistent` triggers `write_deltalake`.
-* **Airflow Tasks**:
-    * Both `daily_kafka_data_catalog_update` and `ingest_kafka_dataset` are scheduled to run when the Airflow service is active.
-    * **Frequency**: The catalog update runs **once daily**, while the dataset ingestion runs **every 5 minutes** by default.
-
-### Trusted Zone governance notes
-
-The Trusted Zone DAGs use least-privilege service credentials for normal
-pipeline access while keeping admin/root accounts available for maintenance.
-RBAC bootstrap is wired into `docker-compose.yml`: MinIO policies/users,
-MongoDB trusted writer, and ClickHouse trusted users are recreated from the
-repository configuration when services are rebuilt from empty volumes.
-
-Invalid data is not silently dropped. Structured cleaning writes rejected
-summaries to `s3://trusted-zone/rejected/structured/`; semi-structured invalid
-documents go to MongoDB collections named `<topic>_rejected`; unstructured image
-metadata and transform failures go to
-`s3://trusted-zone/rejected/unstructured/image/`.
-
-The semi-structured production DAG intentionally reads date-partitioned Kafka
-landing paths such as
-`persistent-landing/semistructured/<topic>/<yyyymmdd>/`. Exploratory notebooks
-may use aggregate JSON/testing files, so path differences between notebook and
-DAG are expected.
+If CUDA is unavailable, image vectorization falls back to CPU.
 
 ---
 
-## Execution Order
-- **Jupyter token**: `jupyter`
+## 3. Airflow Run
+
+Airflow DAGs are manual-trigger friendly. They also support automatic downstream triggering when an upstream DAG succeeds.
+
+Main chain:
+
+```text
+ingest_dataset
+  -> temporal_to_persistent
+  -> write_deltalake
+  -> trusted_zone
+  -> exploitation_zone_structured
+  -> exploitation_zone_semistructured
+  -> exploitation_zone_image_vectorization
+  -> consumption DAGs where applicable
+```
+
+Important notes:
+
+- `catchup=False` is used.
+- DAGs are paused at creation, so enable/trigger the DAGs you want in the Airflow UI.
+- You can manually run any individual DAG.
+- After `trusted_zone`, the structured, semi-structured, and image exploitation DAGs can run in parallel.
+- `ingest_kafka_dataset` and `daily_kafka_data_catalog_update` are scheduled DAGs for streaming/semistructured landing catalogue support.
+
+Recommended Airflow demo:
+
+1. Open Airflow at http://localhost:8080.
+2. Unpause the required DAGs.
+3. Trigger `ingest_dataset`.
+4. Watch the chain continue through trusted and exploitation.
+5. Inspect final outputs in ClickHouse, MongoDB, MinIO, Milvus/Attu, and Superset/Postgres.
+
+Check DAG import errors:
+
+```powershell
+docker compose exec -T airflow-scheduler airflow dags list-import-errors
+```
+
+Expected output:
+
+```text
+No data found
+```
+
+---
+
+## 4. Notebook Run
+
+Open Jupyter:
+
+```text
+http://localhost:8888
+token: jupyter
+```
+
+Run notebooks in this order.
+
 ### Landing Zone
-- `landing_zone.ipynb`
-- `temporal_landing.ipynb`  
-- `persistent_landing.ipynb`  
-- `persistent_landing_delta_lake.ipynb`
-- `data_ingestion_streaming.ipynb`
-- `persistent_landing_delta_lake_nonstructured.ipynb`
+
+1. `notebooks/Landing Zone/1. landing_zone.ipynb`
+2. `notebooks/Landing Zone/2. temporal_landing.ipynb`
+3. `notebooks/Landing Zone/3. persistent_landing.ipynb`
+4. `notebooks/Landing Zone/4. persistent_landing_delta_lake.ipynb`
+5. `notebooks/Landing Zone/5. data_ingestion_streaming.ipynb`
+6. `notebooks/Landing Zone/6. persistent_landing_delta_lake_nonstructured.ipynb`
+
+`5. data_ingestion_streaming.ipynb` contains a Kafka aggregation loop. It is normal for it not to finish by itself. Run it long enough to write `weather-barcelona.json` and `airquality-barcelona.json`, then interrupt the kernel and continue with notebook 6.
+
 ### Trusted Zone
-- `trusted_zone.ipynb`
-- `structured_data_cleaning.ipynb`  
-- `semi-structured_data_cleaning.ipynb`  
-- `unstructured_data_cleaning.ipynb`
-- `catalogue_construction.ipynb`
+
+1. `notebooks/Trusted Zone/1. trusted_zone.ipynb`
+2. `notebooks/Trusted Zone/2. structured_data_cleaning.ipynb`
+3. `notebooks/Trusted Zone/3. semi-structured_data_cleaning.ipynb`
+4. `notebooks/Trusted Zone/4. unstructured_data_cleaning.ipynb`
+
+The unstructured notebook includes trusted image catalogue evidence. There is no separate `catalogue_construction.ipynb`.
+
+### Exploitation Zone
+
+1. `notebooks/Exploitation Zone/1. exploitation_zone.ipynb`
+2. `notebooks/Exploitation Zone/2. structured_data_exploitation.ipynb`
+3. `notebooks/Exploitation Zone/3. semi-structured_data_exploitation.ipynb`
+4. `notebooks/Exploitation Zone/4. unstructured_data_vectorization.ipynb`
+
+Image vectorization can be slow on CPU. Use the GPU override if available.
+
+### Consumption Zone
+
+1. `notebooks/Consumption Zone/1. natural_disaster_tweet_classifier.ipynb`
+2. `notebooks/Consumption Zone/2. spark_streaming_with_kafka_dash.ipynb`
+
+The Spark streaming dashboard logic also exists as `scripts/consumption_streaming_dashboard.py`.
+The `consumption_zone_streaming_dashboard_trigger` DAG runs hourly as a supervisor:
+it checks the Spark application health and restarts the Python streaming job when
+the dashboard stream is not active.
+
+---
+
+## 5. Outputs To Inspect
+
+| Zone | Main Outputs |
+|---|---|
+| Landing | MinIO `landing-zone`, Delta file catalogue |
+| Trusted structured | ClickHouse `bi_analytics.*` |
+| Trusted semi-structured | MongoDB `trusted_zone_semi-structured.*` |
+| Trusted unstructured | MinIO `trusted-zone/unstructured/image/`, `trusted-zone/file_catalog/` |
+| Trusted rejected evidence | `trusted-zone/rejected/`, MongoDB rejected collections |
+| Exploitation structured | ClickHouse `exploitation_analytics.dim_*`, `fact_*`, `bridge_*`, `mart_*` |
+| Exploitation semi-structured | MongoDB `exploitation_zone_semi_structured.*` |
+| Exploitation image | Milvus `image_vector_catalog`, MinIO `exploitation-zone/catalogue/image_vectorization/` |
+| Consumption | ClickHouse model metrics, Postgres/Superset dashboard tables |
+
+---
+
+## 6. Reset Data For A Fresh Test
+
+For a complete cold start, stop containers and remove volumes:
+
+```powershell
+docker compose down -v
+docker compose up --build -d
+docker compose up -d --force-recreate --scale spark-worker=3 spark-master spark-worker
+```
+
+This deletes runtime data in Docker volumes, including MinIO, MongoDB, ClickHouse, Milvus, Postgres, Kafka, and Airflow metadata. Source code and notebooks are not deleted.
+
+If you only want to stop the live Kafka producer before a controlled test:
+
+```powershell
+docker compose stop kafka-producer
+```
+
+Restart it when needed:
+
+```powershell
+docker compose start kafka-producer
+```
+
+---
+
+## 7. Governance Evidence
+
+The report-facing governance configuration is in:
+
+- `config/pipeline_manifest.yaml`
+- `docs/governance_matrix.md`
+
+These files document zones, DAGs, notebook paths, source/target systems, output assets, metadata fields, lineage fields, rejected/quarantine outputs, and RBAC roles.
+
+RBAC smoke test:
+
+```powershell
+docker compose exec -T airflow-apiserver python /opt/airflow/scripts/verify_governance_access.py
+```
+
+Use write checks only when you intentionally want temporary test objects:
+
+```powershell
+docker compose exec -T airflow-apiserver python /opt/airflow/scripts/verify_governance_access.py --write-checks
+```
+
+---
+
+## 8. Common Checks
+
+Check running containers:
+
+```powershell
+docker compose ps
+```
+
+Check Spark workers:
+
+```powershell
+docker compose logs spark-worker --tail=100
+```
+
+Check Jupyter logs:
+
+```powershell
+docker compose logs jupyter --tail=100
+```
+
+Check Airflow import errors:
+
+```powershell
+docker compose exec -T airflow-scheduler airflow dags list-import-errors
+```
+
+Read Kafka topics:
+
+```powershell
+docker exec -it bdm-kafka-1 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --topic weather-barcelona --from-beginning
+docker exec -it bdm-kafka-1 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --topic airquality-barcelona --from-beginning
+```
+
+---
+
+## 9. Notes For Markers
+
+- The project supports structured, semi-structured, and unstructured data.
+- The DAG chain demonstrates orchestration while preserving manual DAG execution.
+- Notebook and DAG implementations are mirrored for evidence, but notebooks remain self-contained.
+- Semi-structured notebook input differences are intentional: notebooks may use aggregation/testing output, while the DAG follows date-partitioned Kafka landing output.
+- Trusted cleaning includes rejected/quarantine evidence and metadata/lineage fields.
+- Exploitation outputs include catalogue, quality summary, and lineage records.
