@@ -124,8 +124,18 @@ class SemiStructuredTrustedCleaner(BaseTrustedZoneService):
             collection = database[collection_name]
             collection.delete_many({"trusted_partition_date": partition_date})
             batch_size = int(os.getenv("TRUSTED_MONGO_BATCH_SIZE", "5000"))
-            for index in range(0, len(records), batch_size):
-                collection.insert_many(records[index : index + batch_size], ordered=False)
+            total_batches = (len(records) + batch_size - 1) // batch_size
+            for batch_number, index in enumerate(range(0, len(records), batch_size), start=1):
+                batch = records[index : index + batch_size]
+                collection.insert_many(batch, ordered=False)
+                self.logger.info(
+                    "Trusted semi-structured MongoDB batch collection=%s partition=%s batch=%s/%s rows=%s",
+                    collection_name,
+                    partition_date,
+                    batch_number,
+                    total_batches,
+                    len(batch),
+                )
             collection.create_index("trusted_partition_date")
             self.logger.info("Loaded %s records into MongoDB collection=%s partition=%s", len(records), collection_name, partition_date)
         finally:

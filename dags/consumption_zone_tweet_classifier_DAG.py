@@ -43,16 +43,17 @@ def consumption_zone_tweet_classifier_dag():
             run_context["source_dag_id"],
             run_context["source_run_id"],
             "exploitation_analytics.fact_tweet_features",
-            "exploitation_analytics.model_tweet_classifier_metrics",
+            "s3a://exploitation-zone/consumption/classifier/natural_disaster_tweet_classifier/,exploitation_analytics.model_tweet_classifier_metrics",
         )
         result = NaturalDisasterTweetClassifierPipeline().run(logical_date)
         logger.info(
-            "Tweet classifier consumption completed dag_id=%s task_id=%s run_id=%s row_count=%s output_assets=%s",
+            "Tweet classifier consumption completed dag_id=%s task_id=%s run_id=%s metrics=%s model_uri=%s output_assets=%s",
             run_context["dag_id"],
             run_context["task_id"],
             run_context["run_id"],
             result,
-            "exploitation_analytics.model_tweet_classifier_metrics",
+            result.get("model_uri"),
+            "s3a://exploitation-zone/consumption/classifier/natural_disaster_tweet_classifier/,exploitation_analytics.model_tweet_classifier_metrics",
         )
         return result
 

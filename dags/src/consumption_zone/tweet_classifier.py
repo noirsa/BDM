@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from hashlib import sha256
 from typing import Any
 
 from src.utils import get_logger, logical_date_iso
@@ -21,6 +22,9 @@ class NaturalDisasterTweetClassifierPipeline:
     CONSUMPTION_TASK = "natural_disaster_tweet_classifier"
     MODEL_NAME = "tfidf_logistic_regression"
     MODEL_VERSION = "v1"
+    MODEL_BUCKET = "exploitation-zone"
+    MODEL_ARTIFACT_PREFIX = "consumption/classifier/natural_disaster_tweet_classifier"
+    MODEL_ARTIFACT_FORMAT = "joblib"
 
     REQUIRED_COLUMNS = {"tweet_text", "disaster_type", "word_count"}
     METRICS_COLUMNS = [
@@ -38,6 +42,9 @@ class NaturalDisasterTweetClassifierPipeline:
         "consumption_task",
         "model_name",
         "model_version",
+        "model_uri",
+        "model_artifact_sha256",
+        "model_artifact_bytes",
     ]
 
     def __init__(self) -> None:
@@ -163,7 +170,14 @@ class NaturalDisasterTweetClassifierPipeline:
         return training_frame
 
     def build_metrics_record(self, dataframe: Any, *, created_at: str) -> dict[str, Any]:
-        metrics = self.train_evaluate(dataframe)
+        training_result = self.train_evaluate(dataframe)
+        metrics = training_result["metrics"]
+        model_artifact = training_result["model_artifact"]
+        model_uri = self.store_model_artifact(
+            model_artifact["bytes"],
+            created_at=created_at,
+            metrics=metrics,
+        )
         record: dict[str, Any] = {
             **metrics,
             "source_system": self.SOURCE_SYSTEM,
@@ -173,14 +187,21 @@ class NaturalDisasterTweetClassifierPipeline:
             "consumption_task": self.CONSUMPTION_TASK,
             "model_name": self.MODEL_NAME,
             "model_version": self.MODEL_VERSION,
+            "model_uri": model_uri,
+            "model_artifact_sha256": model_artifact["sha256"],
+            "model_artifact_bytes": model_artifact["byte_count"],
         }
         return record
 
     def train_evaluate(self, dataframe: Any) -> dict[str, Any]:
+        import io
+
+        import joblib
         from sklearn.feature_extraction.text import TfidfVectorizer
         from sklearn.linear_model import LogisticRegression
         from sklearn.metrics import accuracy_score, precision_recall_fscore_support
         from sklearn.model_selection import train_test_split
+        from sklearn.pipeline import Pipeline
 
         missing_columns = sorted(self.REQUIRED_COLUMNS - set(dataframe.columns))
         if missing_columns:
@@ -210,13 +231,14 @@ class NaturalDisasterTweetClassifierPipeline:
             random_state=2026,
         )
 
-        vectorizer = TfidfVectorizer(max_features=20000, ngram_range=(1, 2))
-        x_train_vec = vectorizer.fit_transform(x_train)
-        x_test_vec = vectorizer.transform(x_test)
-
-        classifier = LogisticRegression(max_iter=1000)
-        classifier.fit(x_train_vec, y_train)
-        y_pred = classifier.predict(x_test_vec)
+        model_pipeline = Pipeline(
+            steps=[
+                ("tfidf", TfidfVectorizer(max_features=20000, ngram_range=(1, 2))),
+                ("classifier", LogisticRegression(max_iter=1000)),
+            ]
+        )
+        model_pipeline.fit(x_train, y_train)
+        y_pred = model_pipeline.predict(x_test)
 
         precision, recall, f1, _ = precision_recall_fscore_support(
             y_test,
@@ -243,7 +265,62 @@ class NaturalDisasterTweetClassifierPipeline:
             metrics["recall"],
             metrics["f1"],
         )
-        return metrics
+
+        artifact_buffer = io.BytesIO()
+        joblib.dump(model_pipeline, artifact_buffer)
+        artifact_bytes = artifact_buffer.getvalue()
+        artifact_digest = sha256(artifact_bytes).hexdigest()
+        self.logger.info(
+            "Classifier model artifact prepared model_name=%s model_version=%s format=%s bytes=%s sha256=%s",
+            self.MODEL_NAME,
+            self.MODEL_VERSION,
+            self.MODEL_ARTIFACT_FORMAT,
+            len(artifact_bytes),
+            artifact_digest,
+        )
+        return {
+            "metrics": metrics,
+            "model_artifact": {
+                "bytes": artifact_bytes,
+                "sha256": artifact_digest,
+                "byte_count": len(artifact_bytes),
+            },
+        }
+
+    def store_model_artifact(self, artifact_bytes: bytes, *, created_at: str, metrics: dict[str, Any]) -> str:
+        from src import get_minio_client
+
+        safe_created_at = "".join(ch if ch.isalnum() else "_" for ch in created_at).strip("_")
+        object_key = (
+            f"{self.MODEL_ARTIFACT_PREFIX}/"
+            f"model_name={self.MODEL_NAME}/"
+            f"model_version={self.MODEL_VERSION}/"
+            f"created_at={safe_created_at}/"
+            f"model.{self.MODEL_ARTIFACT_FORMAT}"
+        )
+        model_uri = f"s3a://{self.MODEL_BUCKET}/{object_key}"
+        minio_role = os.getenv("MINIO_CONSUMPTION_WRITER_ROLE", "writer")
+        minio_client = get_minio_client(role=minio_role)
+        minio_client.upload_file_atomic(
+            self.MODEL_BUCKET,
+            object_key,
+            artifact_bytes,
+            content_type="application/octet-stream",
+            metadata={
+                "model_name": self.MODEL_NAME,
+                "model_version": self.MODEL_VERSION,
+                "schema_version": CONSUMPTION_SCHEMA_VERSION,
+                "created_at": created_at,
+                "accuracy": f"{metrics['accuracy']:.6f}",
+                "f1": f"{metrics['f1']:.6f}",
+            },
+        )
+        self.logger.info(
+            "Classifier model artifact stored model_uri=%s bytes=%s",
+            model_uri,
+            len(artifact_bytes),
+        )
+        return model_uri
 
     def ensure_metrics_table(self) -> None:
         client = self._require_client()
@@ -265,12 +342,23 @@ class NaturalDisasterTweetClassifierPipeline:
                 schema_version String,
                 consumption_task String,
                 model_name String,
-                model_version String
+                model_version String,
+                model_uri String,
+                model_artifact_sha256 String,
+                model_artifact_bytes UInt64
             )
             ENGINE = MergeTree()
             ORDER BY (created_at, consumption_task, model_name, model_version)
             """
         )
+        for column_name, column_type in (
+            ("model_uri", "String"),
+            ("model_artifact_sha256", "String"),
+            ("model_artifact_bytes", "UInt64"),
+        ):
+            client.command(
+                f"ALTER TABLE {self.table_ref(self.METRICS_TABLE)} ADD COLUMN IF NOT EXISTS {self.quote_identifier(column_name)} {column_type}"
+            )
 
     def insert_metrics_record(self, record: dict[str, Any]) -> None:
         client = self._require_client()

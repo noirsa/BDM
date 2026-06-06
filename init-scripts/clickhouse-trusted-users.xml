@@ -37,7 +37,7 @@
       <grants>
         <query>GRANT SHOW TABLES ON exploitation_analytics.*</query>
         <query>GRANT SELECT ON exploitation_analytics.fact_tweet_features</query>
-        <query>GRANT SELECT, INSERT, CREATE TABLE ON exploitation_analytics.model_tweet_classifier_metrics</query>
+        <query>GRANT SELECT, INSERT, CREATE TABLE, ALTER ON exploitation_analytics.model_tweet_classifier_metrics</query>
         <query>GRANT SELECT, INSERT, CREATE TABLE, ALTER ON exploitation_analytics.streaming_dashboard_launch_log</query>
       </grants>
     </consumption_service>

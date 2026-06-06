@@ -59,6 +59,28 @@ chmod +x run.sh
 ./run.sh
 ```
 
+### Optional Docker image/cache cleanup
+
+The startup scripts support optional cleanup flags for reducing Docker image and build-cache disk usage.
+
+These cleanup options are intended for cases where Docker images or build cache have grown too large. They do **not** delete Docker volumes, so persistent data such as databases, object storage, Kafka data, Superset metadata, Airflow metadata, and mounted data directories are preserved.
+
+| Cleanup level | Windows PowerShell | Linux/macOS Bash | What it does |
+|---|---|---|---|
+| Light cleanup | `.\run.ps1 -Prune` | `./run.sh --prune` | Removes build cache and dangling images |
+| Deep cleanup | `.\run.ps1 -DeepPrune` | `./run.sh --deep-prune` | Removes all unused images and build cache |
+
+#### Examples
+
+Start with light cleanup:
+
+```powershell
+.\run.ps1 -Prune
+```
+
+```bash
+./run.sh --prune
+```
 > Note: The Bash script has not been fully tested on all Linux/macOS environments.
 
 > Tip: If either startup script fails, you can always start the default non-GPU stack manually with the command below. This is the safest fallback option and should work on machines without GPU support:
@@ -250,7 +272,7 @@ the dashboard stream is not active.
 | Exploitation structured | ClickHouse `exploitation_analytics.dim_*`, `fact_*`, `bridge_*`, `mart_*` |
 | Exploitation semi-structured | MongoDB `exploitation_zone_semi_structured.*` |
 | Exploitation image | Milvus `image_vector_catalog`, MinIO `exploitation-zone/catalogue/image_vectorization/` |
-| Consumption | ClickHouse model metrics, Postgres/Superset dashboard tables |
+| Consumption | MinIO classifier model artifacts, ClickHouse model metrics/model URIs, Postgres/Superset dashboard tables |
 
 ---
 

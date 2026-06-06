@@ -203,7 +203,7 @@ class UnstructuredTrustedCleaner(BaseTrustedZoneService):
     def clean_all(self, logical_date: Any) -> None:
         """Run unstructured Trusted Zone cleaning."""
         from pyspark.sql import functions as F
-        from pyspark.sql.types import StringType, StructField, StructType
+        from pyspark.sql.types import IntegerType, StringType, StructField, StructType
 
         self.logger.info("Run unstructured trusted cleaning logical_date=%s", logical_date)
         spark_session, catalog_df = self.read_image_catalog("s3a://landing-zone/persistent-landing/structured/file_catalog/")
@@ -230,12 +230,16 @@ class UnstructuredTrustedCleaner(BaseTrustedZoneService):
             )
             allowed_image_extensions = tuple(sorted(ALLOWED_IMAGE_EXTENSIONS))
 
-            def transform_and_upload_image(rows):
+            def transform_and_upload_image(partition_index, rows):
                 import io
                 import os
 
                 import boto3
                 from PIL import Image
+
+                def with_batch(result):
+                    result["batch_id"] = partition_index
+                    return result
 
                 creds = credentials_broadcast.value
                 s3_client = boto3.client(
@@ -253,10 +257,10 @@ class UnstructuredTrustedCleaner(BaseTrustedZoneService):
                         orig_h = row["height"]
                         file_size_bytes = row["file_size_bytes"]
                         if not src_key or not file_size_bytes or int(file_size_bytes) <= 0:
-                            yield {"id": image_id, "trusted_path": None, "status": "FAILED: empty_or_missing_source_file"}
+                            yield with_batch({"id": image_id, "trusted_path": None, "status": "FAILED: empty_or_missing_source_file"})
                             continue
                         if os.path.splitext(src_key.lower())[1] not in allowed_image_extensions:
-                            yield {"id": image_id, "trusted_path": None, "status": "FAILED: unsupported_extension"}
+                            yield with_batch({"id": image_id, "trusted_path": None, "status": "FAILED: unsupported_extension"})
                             continue
                         orig_ext = src_key.rsplit(".", 1)[-1].lower()
                         dest_key = (src_key.rsplit(".", 1)[0] + ".png").replace("persistent-landing/", "")
@@ -267,7 +271,7 @@ class UnstructuredTrustedCleaner(BaseTrustedZoneService):
                                 CopySource={"Bucket": "landing-zone", "Key": src_key},
                                 ContentType="image/png",
                             )
-                            yield {"id": image_id, "trusted_path": f"s3a://trusted-zone/{dest_key}", "status": "DIRECT_COPY"}
+                            yield with_batch({"id": image_id, "trusted_path": f"s3a://trusted-zone/{dest_key}", "status": "DIRECT_COPY"})
                             continue
 
                         obj = s3_client.get_object(Bucket="landing-zone", Key=src_key)
@@ -288,19 +292,44 @@ class UnstructuredTrustedCleaner(BaseTrustedZoneService):
                             Body=buffer.getvalue(),
                             ContentType="image/png",
                         )
-                        yield {"id": image_id, "trusted_path": f"s3a://trusted-zone/{dest_key}", "status": "PILLOW_TRANSFORMED"}
+                        yield with_batch({"id": image_id, "trusted_path": f"s3a://trusted-zone/{dest_key}", "status": "PILLOW_TRANSFORMED"})
                     except Exception as exc:
-                        yield {"id": row["id"], "trusted_path": None, "status": f"FAILED: {exc}"}
+                        yield with_batch({"id": row["id"], "trusted_path": None, "status": f"FAILED: {exc}"})
 
-            processing_results = paths_df.repartition(8).rdd.mapPartitions(transform_and_upload_image).collect()
+            partitioned_paths_df = paths_df.repartition(8)
+            image_batch_count = partitioned_paths_df.rdd.getNumPartitions()
+            self.logger.info(
+                "Starting trusted unstructured image batches batches=%s candidates=%s",
+                image_batch_count,
+                cleaned_image_count,
+            )
+            processing_results = partitioned_paths_df.rdd.mapPartitionsWithIndex(transform_and_upload_image).collect()
             result_schema = StructType(
                 [
                     StructField("id", StringType(), True),
                     StructField("trusted_path", StringType(), True),
                     StructField("status", StringType(), True),
+                    StructField("batch_id", IntegerType(), True),
                 ]
             )
             all_results_df = spark_session.createDataFrame(processing_results, schema=result_schema)
+            batch_status_rows = (
+                all_results_df.groupBy("batch_id", "status")
+                .agg(F.count("*").alias("count"))
+                .collect()
+            )
+            batch_summaries: dict[int, dict[str, int]] = {batch_id: {} for batch_id in range(image_batch_count)}
+            for row in batch_status_rows:
+                batch_summaries[int(row["batch_id"])][row["status"]] = int(row["count"])
+            for batch_id in range(image_batch_count):
+                status_summary = batch_summaries[batch_id]
+                self.logger.info(
+                    "Trusted unstructured image batch batch=%s/%s rows=%s status_counts=%s",
+                    batch_id + 1,
+                    image_batch_count,
+                    sum(status_summary.values()),
+                    status_summary,
+                )
             status_counts = self.log_image_processing_status_counts(all_results_df)
             failed_results_df = all_results_df.filter(~F.col("status").isin("DIRECT_COPY", "PILLOW_TRANSFORMED")).join(
                 cleaned_image_df.select(F.col("file_id").alias("id"), F.col("file_path").alias("source_file_path")),

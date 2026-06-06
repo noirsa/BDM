@@ -83,7 +83,15 @@ class ClickHouseTrustedWriter(BaseTrustedZoneService):
         username = os.getenv("CLICKHOUSE_TRUSTED_USER", os.getenv("CLICKHOUSE_USER", "analytics"))
         password = os.getenv("CLICKHOUSE_TRUSTED_PASSWORD", os.getenv("CLICKHOUSE_PASSWORD", "analytics_secret"))
 
-        def write_partition(rows_iter):
+        partition_count = dataframe.rdd.getNumPartitions()
+        self.logger.info(
+            "Starting trusted structured ClickHouse batch sync database=%s table=%s batches=%s",
+            database_name,
+            table_name,
+            partition_count,
+        )
+
+        def write_partition(partition_index, rows_iter):
             import clickhouse_connect
 
             worker_client = clickhouse_connect.get_client(
@@ -93,13 +101,25 @@ class ClickHouseTrustedWriter(BaseTrustedZoneService):
                 password=password,
                 database=database_name,
             )
-            payload = [tuple(row) for row in rows_iter]
-            if payload:
-                worker_client.insert(table=table_name, data=payload, column_names=column_names)
-            worker_client.close()
-            return [len(payload)]
+            try:
+                payload = [tuple(row) for row in rows_iter]
+                if payload:
+                    worker_client.insert(table=table_name, data=payload, column_names=column_names)
+                return [{"batch_id": partition_index, "rows": len(payload)}]
+            finally:
+                worker_client.close()
 
-        total_inserted = dataframe.rdd.mapPartitions(write_partition).sum()
+        batch_results = dataframe.rdd.mapPartitionsWithIndex(write_partition).collect()
+        for batch_result in sorted(batch_results, key=lambda item: item["batch_id"]):
+            self.logger.info(
+                "Trusted structured ClickHouse batch database=%s table=%s batch=%s/%s rows=%s",
+                database_name,
+                table_name,
+                int(batch_result["batch_id"]) + 1,
+                partition_count,
+                int(batch_result["rows"]),
+            )
+        total_inserted = sum(int(batch_result["rows"]) for batch_result in batch_results)
         self.logger.info("Parallel sync completed for %s.%s rows=%s", database_name, table_name, total_inserted)
 
     def preview_table(self, table_name: str, database_name: str, sample_size: int = 3) -> list[dict[str, Any]]:

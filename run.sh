@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PRUNE=0
+DEEP_PRUNE=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --prune)
+      PRUNE=1
+      ;;
+    --deep-prune)
+      DEEP_PRUNE=1
+      ;;
+    *)
+      echo "Unknown option: $arg"
+      echo "Usage: ./run.sh [--prune] [--deep-prune]"
+      exit 1
+      ;;
+  esac
+done
+
 has_nvidia_gpu() {
   if command -v nvidia-smi >/dev/null 2>&1; then
     if nvidia-smi >/dev/null 2>&1; then
@@ -9,6 +28,20 @@ has_nvidia_gpu() {
   fi
   return 1
 }
+
+if [ "$PRUNE" -eq 1 ]; then
+  echo "Cleaning Docker build cache..."
+  docker builder prune -f
+
+  echo "Cleaning dangling images..."
+  docker image prune -f
+fi
+
+if [ "$DEEP_PRUNE" -eq 1 ]; then
+  echo "Deep cleaning unused Docker images and build cache. Volumes will NOT be removed..."
+  docker builder prune -a -f
+  docker image prune -a -f
+fi
 
 if has_nvidia_gpu; then
   echo "NVIDIA GPU detected. Starting full stack with GPU support and 3 Spark workers..."
@@ -20,7 +53,23 @@ else
   HAS_GPU=0
 fi
 
-docker compose "${COMPOSE_FILES[@]}" up --build -d --scale spark-worker=3
+echo ""
+echo "Step 1: Starting full stack without scaling Spark workers first..."
+docker compose "${COMPOSE_FILES[@]}" up -d
+
+echo ""
+echo "Step 2: GPU verification..."
+
+if [ "$HAS_GPU" -eq 1 ]; then
+  echo "Verifying CUDA in Jupyter..."
+  docker compose "${COMPOSE_FILES[@]}" exec jupyter python -c "import torch; print('CUDA available:', torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NO GPU')"
+else
+  echo "GPU verification skipped because no NVIDIA GPU was detected."
+fi
+
+echo ""
+echo "Step 3: Scaling Spark workers to 3..."
+docker compose "${COMPOSE_FILES[@]}" up -d --scale spark-worker=3
 
 echo ""
 echo "Full stack started."

@@ -196,13 +196,16 @@ zones:
       - Spark Structured Streaming
     target_systems:
       - ClickHouse exploitation_analytics
+      - MinIO exploitation-zone
       - PostgreSQL dashboard sink
       - notebook report output
     output_assets:
+      - s3a://exploitation-zone/consumption/classifier/natural_disaster_tweet_classifier/
       - exploitation_analytics.model_tweet_classifier_metrics
       - exploitation_analytics.streaming_dashboard_launch_log
       - PostgreSQL.weather_events
     asset_types:
+      - model_artifact
       - model_metrics_table
       - dashboard_launch_log
       - streaming_dashboard_table
@@ -210,6 +213,8 @@ zones:
     metadata_fields:
       - source_assets
       - model_name
+      - model_uri
+      - model_artifact_sha256
       - accuracy
       - precision
       - recall
@@ -220,6 +225,7 @@ zones:
     rbac_roles_used:
       - clickhouse_consumption_writer
       - clickhouse_consumption_reader
+      - minio_exploitation_writer
       - kafka_reader
       - postgres_dashboard_writer
 
