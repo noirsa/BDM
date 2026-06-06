@@ -145,7 +145,6 @@ def trusted_zone_dag():
 
         downstream = [
             "exploitation_zone_structured",
-            "exploitation_zone_semistructured",
             "exploitation_zone_image_vectorization",
         ]
         logger = get_logger("dags.trusted_zone")
@@ -181,19 +180,7 @@ def trusted_zone_dag():
         wait_for_completion=True,
         poke_interval=30,
     )
-    trigger_semistructured_exploitation = TriggerDagRunOperator(
-        task_id="trigger_exploitation_zone_semistructured",
-        trigger_dag_id="exploitation_zone_semistructured",
-        conf={
-            "trigger_source": "trusted_zone_flow",
-            "source_dag_id": "trusted_zone",
-            "source_run_id": "{{ run_id }}",
-            "source_logical_date": "{{ (dag_run.conf or {}).get('source_logical_date') or logical_date.isoformat() }}",
-            "pipeline_mode": "auto_chained",
-        },
-        wait_for_completion=True,
-        poke_interval=30,
-    )
+
     trigger_image_exploitation = TriggerDagRunOperator(
         task_id="trigger_exploitation_zone_image_vectorization",
         trigger_dag_id="exploitation_zone_image_vectorization",
@@ -212,7 +199,6 @@ def trusted_zone_dag():
     (
         log_exploitation_triggers
         >> trigger_structured_exploitation
-        >> trigger_semistructured_exploitation
         >> trigger_image_exploitation
     )
 
@@ -259,7 +245,23 @@ def trusted_zone_semistructured_daily_dag():
         pipeline = _build_pipeline()
         pipeline.clean_semistructured_data(logical_date)
 
-    clean_semistructured_data_task()
+    clean_semistructured = clean_semistructured_data_task()
+
+    trigger_semistructured_exploitation = TriggerDagRunOperator(
+        task_id="trigger_exploitation_zone_semistructured",
+        trigger_dag_id="exploitation_zone_semistructured",
+        conf={
+            "trigger_source": "trusted_zone_semistructured_daily",
+            "source_dag_id": "trusted_zone_semistructured_daily",
+            "source_run_id": "{{ run_id }}",
+            "source_logical_date": "{{ logical_date.isoformat() }}",
+            "pipeline_mode": "daily_streaming_chained",
+        },
+        wait_for_completion=True,
+        poke_interval=30,
+    )
+
+    clean_semistructured >> trigger_semistructured_exploitation
 
 
 trusted_zone_dag()

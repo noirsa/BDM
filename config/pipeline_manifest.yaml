@@ -240,15 +240,15 @@ orchestration:
         - exploitation_zone_structured
         - exploitation_zone_semistructured
         - exploitation_zone_image_vectorization
-      mode: parallel
+      mode: sequential
     - from: exploitation_zone_structured
       to: consumption_zone_tweet_classifier
       mode: sequential
     - from: exploitation_zone_semistructured
       to: consumption_zone_streaming_dashboard_trigger
       mode: sequential
-  parallel_groups:
-    - name: exploitation_fanout
+  sequential_groups:
+    - name: exploitation_chain
       upstream_dag_id: trusted_zone
       dag_ids:
         - exploitation_zone_structured

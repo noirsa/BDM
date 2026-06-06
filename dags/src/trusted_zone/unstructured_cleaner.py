@@ -52,18 +52,25 @@ class UnstructuredTrustedCleaner(BaseTrustedZoneService):
     def clean_image_metadata(self, image_records: Any) -> Any:
         """Produce trusted unstructured metadata/features."""
         from pyspark.sql import functions as F
+        from pyspark.sql.window import Window
 
         blob_schema = self.image_metadata_schema()
-        return (
+        deterministic_image_choice = Window.partitionBy("md5").orderBy(F.col("file_path").asc(), F.col("file_id").asc())
+        cleaned = (
             image_records.filter(F.col("file_type") == "Image")
             .withColumn("meta", F.from_json(F.col("metadata_blob"), blob_schema))
             .filter(F.col("file_path").isNotNull())
+            .filter(F.col("file_id").isNotNull())
             .filter(F.col("meta.file_size_bytes") > F.lit(0))
             .filter(F.col("meta.is_corrupted") == F.lit(False))
             .filter(F.lower(F.col("file_path")).rlike(r"\.(jpg|jpeg|png|webp)$"))
             .withColumn("md5", F.col("meta.md5"))
-            .dropDuplicates(["md5"])
+            .filter(F.col("md5").isNotNull())
+            .withColumn("dedupe_rank", F.row_number().over(deterministic_image_choice))
+            .filter(F.col("dedupe_rank") == 1)
+            .drop("dedupe_rank")
         )
+        return cleaned
 
     def write_trusted_image_metadata(self, dataframe: Any, target_path: str) -> None:
         """Write trusted image metadata to Delta."""
@@ -146,16 +153,20 @@ class UnstructuredTrustedCleaner(BaseTrustedZoneService):
         blob_schema = self.image_metadata_schema()
         parsed = image_records.filter(F.col("file_type") == "Image").withColumn("meta", F.from_json(F.col("metadata_blob"), blob_schema))
         rejected = parsed.where(
-            F.col("file_path").isNull()
+            F.col("file_id").isNull()
+            | F.col("file_path").isNull()
             | F.col("meta.file_size_bytes").isNull()
             | (F.col("meta.file_size_bytes") <= F.lit(0))
             | (F.col("meta.is_corrupted") == F.lit(True))
+            | F.col("meta.md5").isNull()
             | (~F.lower(F.col("file_path")).rlike(r"\.(jpg|jpeg|png|webp)$"))
         ).withColumn(
             "reason",
-            F.when(F.col("file_path").isNull(), F.lit("missing_file_path"))
+            F.when(F.col("file_id").isNull(), F.lit("missing_file_id"))
+            .when(F.col("file_path").isNull(), F.lit("missing_file_path"))
             .when(F.col("meta.file_size_bytes").isNull() | (F.col("meta.file_size_bytes") <= F.lit(0)), F.lit("empty_or_missing_source_file"))
             .when(F.col("meta.is_corrupted") == F.lit(True), F.lit("corrupted_image"))
+            .when(F.col("meta.md5").isNull(), F.lit("missing_md5"))
             .otherwise(F.lit("unsupported_extension")),
         )
         metadata = governance_metadata(
@@ -199,7 +210,9 @@ class UnstructuredTrustedCleaner(BaseTrustedZoneService):
         try:
             self.validate_image_objects(catalog_df)
             rejected_catalog_df = self.rejected_image_metadata(catalog_df, logical_date)
-            cleaned_image_df = self.clean_image_metadata(catalog_df)
+            cleaned_image_df = self.clean_image_metadata(catalog_df).cache()
+            cleaned_image_count = cleaned_image_df.count()
+            self.logger.info("Prepared deterministic trusted image candidates count=%s", cleaned_image_count)
             paths_df = cleaned_image_df.select(
                 F.col("file_id").alias("id"),
                 F.col("file_path").alias("file_path"),

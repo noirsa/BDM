@@ -33,9 +33,39 @@ The default `.env.example` values are designed for the Docker Compose network. D
 
 ### Full Stack
 
+This project provides two helper scripts for starting the full stack with automatic GPU detection and three Spark workers.
+
+The startup scripts automatically detect whether NVIDIA GPU support is available:
+
+- If `nvidia-smi` is available, the scripts use `docker-compose.gpu.yml`.
+- If no NVIDIA GPU is detected, the scripts fall back to the default non-GPU stack.
+- Both modes start three Spark workers with `--scale spark-worker=3`.
+
+| Platform | Script |
+|---|---|
+| Windows PowerShell | `run.ps1` |
+| Linux/macOS Bash | `run.sh` |
+
+On Windows PowerShell:
+
 ```powershell
-docker compose up --build -d
+.\run.ps1
 ```
+
+On Linux/macOS Bash:
+
+```bash
+chmod +x run.sh
+./run.sh
+```
+
+> Note: The Bash script has not been fully tested on all Linux/macOS environments.
+
+> Tip: If either startup script fails, you can always start the default non-GPU stack manually with the command below. This is the safest fallback option and should work on machines without GPU support:
+>
+> ```bash
+> docker compose up --build -d --scale spark-worker=3
+> ```
 
 Useful local URLs:
 
@@ -50,32 +80,62 @@ Useful local URLs:
 | Attu | http://localhost:3000 | Milvus vector DB inspection |
 | Superset | http://localhost:8088 | dashboard service |
 
-### Spark Workers For Parallel Exploitation
+### Spark Workers for Dedicated Workloads
 
-For parallel structured, semi-structured, and image/vector exploitation, run three Spark workers:
+This project uses three Spark workers by default so that different Spark applications can run without blocking each other:
 
-```powershell
-docker compose up -d --force-recreate --scale spark-worker=3 spark-master spark-worker
-```
+- one worker for semi-structured processing
+- one worker for regular/batch processing tasks
+- one worker for the consumption dashboard / streaming workload
 
-Then open http://localhost:8082 and confirm three workers are registered.
+After startup, open http://localhost:8082 and confirm that three workers are registered.
+
+> Note: Spark still schedules executors automatically across available workers. The three-worker setup provides enough capacity for the semi-structured, regular processing, and consumption workloads to run concurrently, but it does not pin each workload to a specific worker unless additional resource constraints are configured.
 
 ### GPU Optional
 
-The default stack can run without a GPU. For GPU image vectorization:
+The default stack can run without a GPU.
 
-```powershell
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml build jupyter airflow-worker
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --force-recreate jupyter airflow-worker
+If a working NVIDIA GPU environment is detected, the startup scripts use the GPU Compose override automatically:
+
+```text
+docker-compose.gpu.yml
 ```
 
-Verify:
+If CUDA is unavailable or the GPU stack cannot start, use the default non-GPU fallback:
+
+```bash
+docker compose up --build -d --scale spark-worker=3
+```
+
+Verify GPU availability after startup:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml exec jupyter python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NO GPU')"
 ```
 
-If CUDA is unavailable, image vectorization falls back to CPU.
+If CUDA is unavailable inside the container, image vectorization falls back to CPU only when the service itself can start successfully.
+
+### Script Encoding
+
+Save the Bash script as:
+
+```text
+UTF-8 without BOM
+LF line endings
+```
+
+Save the PowerShell script as:
+
+```text
+UTF-8
+```
+
+or, for older Windows PowerShell compatibility:
+
+```text
+UTF-8 with BOM
+```
 
 ---
 
@@ -101,7 +161,7 @@ Important notes:
 - `catchup=False` is used.
 - DAGs are paused at creation, so enable/trigger the DAGs you want in the Airflow UI.
 - You can manually run any individual DAG.
-- After `trusted_zone`, the structured, semi-structured, and image exploitation DAGs can run in parallel.
+- After `trusted_zone`, the structured, semi-structured, and image exploitation DAGs run sequentially to avoid Spark application contention.
 - `ingest_kafka_dataset` and `daily_kafka_data_catalog_update` are scheduled DAGs for streaming/semistructured landing catalogue support.
 
 Recommended Airflow demo:
