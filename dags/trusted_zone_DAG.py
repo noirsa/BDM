@@ -25,7 +25,7 @@ def _build_pipeline() -> Any:
     start_date=pendulum.datetime(2026, 3, 30, tz="Europe/Madrid"),
     schedule=None,
     catchup=False,
-    is_paused_upon_creation=True,
+    is_paused_upon_creation=False,
     tags=["trusted-zone", "cleaning", "manual"],
 )
 def trusted_zone_dag():
