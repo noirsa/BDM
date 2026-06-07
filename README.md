@@ -173,9 +173,13 @@ ingest_dataset
   -> write_deltalake
   -> trusted_zone
   -> exploitation_zone_structured
-  -> exploitation_zone_semistructured
+  -> consumption_zone_tweet_classifier
+
+trusted_zone
   -> exploitation_zone_image_vectorization
-  -> consumption DAGs where applicable
+
+trusted_zone_semistructured_daily
+  -> exploitation_zone_semistructured
 ```
 
 Important notes:
@@ -183,7 +187,7 @@ Important notes:
 - `catchup=False` is used.
 - DAGs are paused at creation, so enable/trigger the DAGs you want in the Airflow UI.
 - You can manually run any individual DAG.
-- After `trusted_zone`, the structured, semi-structured, and image exploitation DAGs run sequentially to avoid Spark application contention.
+- After `trusted_zone`, the structured exploitation and image vectorization DAGs run sequentially to avoid Spark application contention. The semi-structured path is handled by `trusted_zone_semistructured_daily`, which triggers `exploitation_zone_semistructured`.
 - `ingest_kafka_dataset` and `daily_kafka_data_catalog_update` are scheduled DAGs for streaming/semistructured landing catalogue support.
 
 Recommended Airflow demo:

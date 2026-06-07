@@ -244,21 +244,23 @@ orchestration:
     - from: trusted_zone
       to:
         - exploitation_zone_structured
-        - exploitation_zone_semistructured
         - exploitation_zone_image_vectorization
+      mode: sequential
+    - from: trusted_zone_semistructured_daily
+      to: exploitation_zone_semistructured
       mode: sequential
     - from: exploitation_zone_structured
       to: consumption_zone_tweet_classifier
       mode: sequential
+  documented_relationships:
     - from: exploitation_zone_semistructured
       to: consumption_zone_streaming_dashboard_trigger
-      mode: sequential
+      note: Dashboard supervisor runs hourly or manually; semi-structured exploitation only logs the intended downstream relationship.
   sequential_groups:
     - name: exploitation_chain
       upstream_dag_id: trusted_zone
       dag_ids:
         - exploitation_zone_structured
-        - exploitation_zone_semistructured
         - exploitation_zone_image_vectorization
   trigger_conf_fields:
     - trigger_source

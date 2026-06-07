@@ -12,9 +12,9 @@ huggingface_config = load_huggingface_config()
 @dag(
     dag_id='ingest_dataset',
     start_date=datetime(2026, 3, 30),
-    schedule='@once',
+    schedule=None,
     catchup=False,
-    tags=['infrastructure', 'dataset'],
+    tags=['infrastructure', 'dataset', 'manual'],
     is_paused_upon_creation=False
 )
 def ingest_dataset_dag():
