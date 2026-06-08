@@ -98,6 +98,7 @@ Useful local URLs:
 | MinIO Console | http://localhost:9001 | credentials from `.env` |
 | Spark Master UI | http://localhost:8082 | worker/application status |
 | Kafka UI | http://localhost:8081 | topics and messages |
+| ClickHouse UI | http://localhost:8123 | ClickHouse DB inspection |
 | Mongo Express | http://localhost:8083 | MongoDB inspection |
 | Attu | http://localhost:3000 | Milvus vector DB inspection |
 | Superset | http://localhost:8088 | dashboard service |
